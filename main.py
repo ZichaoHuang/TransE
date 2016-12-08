@@ -72,7 +72,7 @@ def run_training(args):
                     id_triplet_negative: batch_negative
                 }
                 # run the graph
-                (_, loss_batch) = sess.run([train_op, loss], feed_dict=feed_dict)
+                _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict)
                 loss_epoch += loss_batch
 
                 # update batch progressbar

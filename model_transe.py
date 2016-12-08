@@ -59,7 +59,7 @@ class TransE:
 
     def train(self, loss):
         # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast using this
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast by using this
         train_op = optimizer.minimize(loss)
 
         return train_op

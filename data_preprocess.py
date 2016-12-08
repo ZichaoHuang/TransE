@@ -36,7 +36,7 @@ class DataSet:
         # read the entity2id file
         with Path(self.data_dir).joinpath('entity2id.txt').open() as file:
             print('loading entity file...')
-            for (entity, id_entity) in csv.reader(file, delimiter='\t'):
+            for entity, id_entity in csv.reader(file, delimiter='\t'):
                 self.entity2id[entity] = id_entity
                 self.id2entity[id_entity] = entity
             self.num_entity = len(self.entity2id)
@@ -45,7 +45,7 @@ class DataSet:
         # read the relation2id file
         with Path(self.data_dir).joinpath('relation2id.txt').open() as file:
             print('loading relation file...')
-            for (relation, id_relation) in csv.reader(file, delimiter='\t'):
+            for relation, id_relation in csv.reader(file, delimiter='\t'):
                 self.relation2id[relation] = id_relation
                 self.id2relation[id_relation] = relation
             self.num_relation = len(self.relation2id)
@@ -54,7 +54,7 @@ class DataSet:
         # read the train file
         with Path(self.data_dir).joinpath('train.txt').open() as file:
             print('loading train triplets file...')
-            for (head, tail, relation) in csv.reader(file, delimiter='\t'):
+            for head, tail, relation in csv.reader(file, delimiter='\t'):
                 id_head = self.entity2id[head]
                 id_relation = self.relation2id[relation]
                 id_tail = self.entity2id[tail]
@@ -107,13 +107,13 @@ class DataSet:
 
         # construct negative batch
         batch_negative = []
-        for (id_head, id_relation, id_tail) in batch_positive:
+        for id_head, id_relation, id_tail in batch_positive:
             id_head_corrupted = id_head
             id_tail_corrupted = id_tail
 
             head_prob = binomial(1, 0.5)  # default: unif
             if self.negative_sampling == 'bern':  # bern
-                (hpt, tph) = self.relation_hpt_tph[id_relation]
+                hpt, tph = self.relation_hpt_tph[id_relation]
                 head_prob = binomial(1, (tph / (tph + hpt)))
 
             # corrupt head or tail, but not both
