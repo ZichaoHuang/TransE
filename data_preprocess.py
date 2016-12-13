@@ -2,7 +2,7 @@ import random
 import csv
 
 from numpy.random import binomial
-from pathlib import Path
+from os import path
 from itertools import accumulate
 
 
@@ -34,7 +34,7 @@ class DataSet:
 
     def load_data(self):
         # read the entity2id file
-        with Path(self.data_dir).joinpath('entity2id.txt').open() as file:
+        with open(path.join(self.data_dir, 'entity2id.txt'), mode='r') as file:
             print('loading entity file...')
             for entity, id_entity in csv.reader(file, delimiter='\t'):
                 self.entity2id[entity] = id_entity
@@ -43,7 +43,7 @@ class DataSet:
             print('get {} entities'.format(self.num_entity))
 
         # read the relation2id file
-        with Path(self.data_dir).joinpath('relation2id.txt').open() as file:
+        with open(path.join(self.data_dir, 'relation2id.txt'), mode='r') as file:
             print('loading relation file...')
             for relation, id_relation in csv.reader(file, delimiter='\t'):
                 self.relation2id[relation] = id_relation
@@ -52,7 +52,7 @@ class DataSet:
             print('get {} relations'.format(self.num_relation))
 
         # read the train file
-        with Path(self.data_dir).joinpath('train.txt').open() as file:
+        with open(path.join(self.data_dir, 'train.txt'), mode='r') as file:
             print('loading train triplets file...')
             for head, tail, relation in csv.reader(file, delimiter='\t'):
                 id_head = self.entity2id[head]

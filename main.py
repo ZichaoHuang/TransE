@@ -3,6 +3,7 @@ from model_transe import TransE
 
 import numpy as np
 import argparse
+from os import path
 from tqdm import tqdm
 import tensorflow as tf
 
@@ -52,6 +53,10 @@ def run_training(args):
 
     # open a session and run the training graph
     with tf.Session(graph=graph_transe_training) as sess:
+        # saver for writing training checkpoints
+        saver = tf.train.Saver()
+        checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model.ckpt')
+
         # run the initial operation
         print('initializing all variables...')
         sess.run(tf.global_variables_initializer())
@@ -74,6 +79,16 @@ def run_training(args):
                 # run the graph
                 _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict)
                 loss_epoch += loss_batch
+
+                # save a checkpoint and evaluate the model periodically
+                if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
+
+                    save_path = saver.save(
+                        sess=sess,
+                        save_path=checkpoint_path,
+                        global_step=batch
+                    )
+                    print('model save at path: {}'.format(save_path))
 
                 # update batch progressbar
                 progressbar_batch.set_description(desc='last batch loss: {:.3f}'.format(loss_batch))
