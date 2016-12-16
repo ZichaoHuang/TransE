@@ -92,17 +92,20 @@ class DataSet:
     def set_bernoulli(self, triplets_train_df):
         print('calculating hpt & tph for reducing negative false labels...')
         grouped_relation = triplets_train_df.groupby('relation', as_index=False)
+        # calculate head_per_tail and tail_per_head after group by relation
+        # n_to_one dataframe, columns = ['relation', 'head', 'tail']
         n_to_one = grouped_relation.agg({
             'head': lambda heads: heads.count(),
             'tail': lambda tails: tails.nunique()
         })
+        # one_to_n dataframe, columns = ['relation', 'head', 'tail']
         one_to_n = grouped_relation.agg({
             'head': lambda heads: heads.nunique(),
             'tail': lambda tails: tails.count()
         })
         relation_dist_df = pd.DataFrame({
             'relation': n_to_one['relation'],
-            'head_per_tail': n_to_one['head'] / n_to_one['tail'],
+            'head_per_tail': n_to_one['head'] / n_to_one['tail'],  # element-wise division
             'tail_per_head': one_to_n['tail'] / one_to_n['head']
         })
         self.relation_dist = dict(zip(
@@ -140,3 +143,8 @@ class DataSet:
             batch_negative.append((id_head_corrupted, id_relation, id_tail_corrupted))
 
         return batch_positive, batch_negative
+
+    def next_batch_validate(self, batch_size):
+        batch = random.sample(self.triplets_validate, batch_size)
+
+        return batch

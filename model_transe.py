@@ -71,5 +71,17 @@ class TransE:
 
         return train_op
 
-    # def evaluation(self, id_triplet_positive, id_triplet_negative):
+    def evaluation(self, id_triplet_validate):
+        with tf.variable_scope('embedding', reuse=True):
+            embedding_entity = tf.get_variable(name='entity')
+            embedding_relation = tf.get_variable(name='relation')
+
+        embedding_head = tf.nn.embedding_lookup(embedding_entity, id_triplet_validate[:, 0])
+        embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplet_validate[:, 1])
+        embedding_tail = tf.nn.embedding_lookup(embedding_entity, id_triplet_validate[:, 2])
+
+        dissimilarity = tf.sqrt(tf.reduce_sum(tf.square(embedding_head + embedding_relation
+                                                        - embedding_tail)))
+
+        return dissimilarity
 

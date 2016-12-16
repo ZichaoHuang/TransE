@@ -42,7 +42,7 @@ def run_training(args):
         # model train operation
         train_op = model.train(loss)
         # model evaluation
-        # evaluation = model.evaluation()
+        evaluation = model.evaluation(id_triplet_positive)
 
     # # check initial embedding
     # with tf.Session(graph=graph_transe_training) as sess:
@@ -79,23 +79,30 @@ def run_training(args):
             progressbar_batch = tqdm(total=num_batch, desc='batch training', leave=False)
             for batch in range(num_batch):
                 batch_positive, batch_negative = dataset.next_batch(model.batch_size)
-                feed_dict = {
+                feed_dict_train = {
                     id_triplet_positive: batch_positive,
                     id_triplet_negative: batch_negative
                 }
                 # run the graph
-                _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict)
+                _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict_train)
                 loss_epoch += loss_batch
 
                 # save a checkpoint and evaluate the model periodically
-                if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
-
+                if batch % 500 == 0 or batch == num_batch:
+                    # save a checkpoint
                     save_path = saver.save(
                         sess=sess,
                         save_path=checkpoint_path,
                         global_step=batch
                     )
-                    print('model save at path: {}'.format(save_path))
+                    print('\nmodel save at path: {}'.format(save_path))
+
+                    # evaluate the model
+                    feed_dict_validate = {
+                        id_triplet_positive: dataset.next_batch_validate(model.batch_size)
+                    }
+                    dissimilarity = sess.run([evaluation], feed_dict=feed_dict_validate)
+                    print('dissimilarity at epoch {}, batch {}: {}'.format(epoch, batch, dissimilarity))
 
                 # update batch progressbar
                 progressbar_batch.set_description(desc='last batch loss: {:.3f}'.format(loss_batch))
