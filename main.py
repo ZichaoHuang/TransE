@@ -14,8 +14,10 @@ def run_training(args):
     model = TransE(learning_rate=args.learning_rate,
                    batch_size=args.batch_size,
                    num_epoch=args.num_epoch,
+                   margin=args.margin,
                    embedding_dimension=args.embedding_dimension,
-                   margin=args.margin)
+                   num_entity=dataset.num_entity,
+                   num_relation=dataset.num_relation)
 
     # construct the training graph
     graph_transe_training = tf.Graph()
@@ -33,9 +35,14 @@ def run_training(args):
                 name='id_triplet_negative'
             )
 
-        d_positive, d_negative = model.inference(dataset, id_triplet_positive, id_triplet_negative)
+        # model inference
+        d_positive, d_negative = model.inference(id_triplet_positive, id_triplet_negative)
+        # model train loss
         loss = model.loss(d_positive, d_negative)
+        # model train operation
         train_op = model.train(loss)
+        # model evaluation
+        # evaluation = model.evaluation()
 
     # # check initial embedding
     # with tf.Session(graph=graph_transe_training) as sess:

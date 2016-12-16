@@ -8,22 +8,26 @@ class TransE:
                  learning_rate,
                  batch_size,
                  num_epoch,
+                 margin,
                  embedding_dimension,
-                 margin):
+                 num_entity,
+                 num_relation):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epoch = num_epoch
-        self.embedding_dimension = embedding_dimension
         self.margin = margin
+        self.embedding_dimension = embedding_dimension
+        self.num_entity = num_entity
+        self.num_relation = num_relation
 
-    def inference(self, dataset, id_triplet_positive, id_triplet_negative):
+    def inference(self, id_triplet_positive, id_triplet_negative):
         minval = -6 / math.sqrt(self.embedding_dimension)
         maxval = 6 / math.sqrt(self.embedding_dimension)
         with tf.variable_scope('embedding'):
             embedding_entity = tf.get_variable(
                 name='entity',
                 initializer=tf.random_uniform(
-                    shape=[dataset.num_entity, self.embedding_dimension],
+                    shape=[self.num_entity, self.embedding_dimension],
                     minval=minval,
                     maxval=maxval
                 )
@@ -31,7 +35,7 @@ class TransE:
             embedding_relation = tf.get_variable(
                 name='relation',
                 initializer=tf.random_uniform(
-                    shape=[dataset.num_relation, self.embedding_dimension],
+                    shape=[self.num_relation, self.embedding_dimension],
                     minval=minval,
                     maxval=maxval
                 )
@@ -55,11 +59,17 @@ class TransE:
         return d_positive, d_negative
 
     def loss(self, d_positive, d_negative):
-        return tf.reduce_sum(tf.nn.relu(tf.constant(self.margin) + d_positive - d_negative))
+        return tf.reduce_sum(tf.nn.relu(tf.constant(self.margin) + d_positive - d_negative), name='max_margin_loss')
 
     def train(self, loss):
+        # # add a scalar summary for the snapshot loss
+        # tf.scalar_summary(loss.op.name, loss)
+
         # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast by using this
         train_op = optimizer.minimize(loss)
 
         return train_op
+
+    # def evaluation(self, id_triplet_positive, id_triplet_negative):
+
