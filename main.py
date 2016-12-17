@@ -1,4 +1,4 @@
-from data_preprocess import DataSet
+from fb15k import DataSet
 from model_transe import TransE
 
 import numpy as np
@@ -15,59 +15,51 @@ def run_training(args):
                    batch_size=args.batch_size,
                    num_epoch=args.num_epoch,
                    margin=args.margin,
-                   embedding_dimension=args.embedding_dimension,
-                   num_entity=dataset.num_entity,
-                   num_relation=dataset.num_relation)
+                   embedding_dimension=args.embedding_dimension)
 
     # construct the training graph
     graph_transe_training = tf.Graph()
     with graph_transe_training.as_default():
+        print('constructing the training graph...')
         # generate placeholders for the graph
         with tf.variable_scope('id'):
-            id_triplet_positive = tf.placeholder(
+            id_triplets_positive = tf.placeholder(
                 dtype=tf.int32,
                 shape=[model.batch_size, 3],
-                name='id_triplet_positive'
+                name='triplets_positive'
             )
-            id_triplet_negative = tf.placeholder(
+            id_triplets_negative = tf.placeholder(
                 dtype=tf.int32,
                 shape=[model.batch_size, 3],
-                name='id_triplet_negative'
+                name='triplets_negative'
+            )
+            id_triplets_validate = tf.placeholder(
+                dtype=tf.int32,
+                shape=[2 * dataset.num_entity - 1, 3],  # 2 * (num_entity - 1) + 1
+                name='triplet_validate'
             )
 
         # model inference
-        d_positive, d_negative = model.inference(id_triplet_positive, id_triplet_negative)
+        d_positive, d_negative = model.inference(id_triplets_positive, id_triplets_negative,
+                                                 dataset.num_entity, dataset.num_relation)
         # model train loss
         loss = model.loss(d_positive, d_negative)
         # model train operation
         train_op = model.train(loss)
         # model evaluation
-        evaluation = model.evaluation(id_triplet_positive)
-
-    # # check initial embedding
-    # with tf.Session(graph=graph_transe_training) as sess:
-    #     sess.run(tf.global_variables_initializer())
-    #     batch_positive, batch_negative = dataset.next_batch(model.batch_size)
-    #     feed_dict = {
-    #         id_triplet_positive: batch_positive,
-    #         id_triplet_negative: batch_negative
-    #     }
-    #     entity, relation = sess.run([embedding_head_pos, embedding_relation], feed_dict=feed_dict)
-    #     print('entity norm: ')
-    #     print(np.linalg.norm(entity, ord=2, axis=1))
-    #     print('relation norm: ')
-    #     print(np.linalg.norm(relation, ord=2, axis=1))
+        eval_op = model.evaluation(id_triplets_validate)
+        print('graph constructing finished')
 
     # open a session and run the training graph
     with tf.Session(graph=graph_transe_training) as sess:
         # saver for writing training checkpoints
         saver = tf.train.Saver()
-        checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model.ckpt')
+        checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model')
 
         # run the initial operation
         print('initializing all variables...')
         sess.run(tf.global_variables_initializer())
-        print('all variables initialized...')
+        print('all variables initialized')
 
         num_batch = dataset.num_triplets_train // model.batch_size
 
@@ -80,15 +72,15 @@ def run_training(args):
             for batch in range(num_batch):
                 batch_positive, batch_negative = dataset.next_batch(model.batch_size)
                 feed_dict_train = {
-                    id_triplet_positive: batch_positive,
-                    id_triplet_negative: batch_negative
+                    id_triplets_positive: batch_positive,
+                    id_triplets_negative: batch_negative
                 }
                 # run the graph
                 _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict_train)
                 loss_epoch += loss_batch
 
                 # save a checkpoint and evaluate the model periodically
-                if batch % 500 == 0 or batch == num_batch:
+                if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
                     # save a checkpoint
                     save_path = saver.save(
                         sess=sess,
@@ -98,11 +90,24 @@ def run_training(args):
                     print('\nmodel save at path: {}'.format(save_path))
 
                     # evaluate the model
-                    feed_dict_validate = {
-                        id_triplet_positive: dataset.next_batch_validate(model.batch_size)
-                    }
-                    dissimilarity = sess.run([evaluation], feed_dict=feed_dict_validate)
-                    print('dissimilarity at epoch {}, batch {}: {}'.format(epoch, batch, dissimilarity))
+                    print('evaluating the current model...')
+                    progressbar_eval = tqdm(total=dataset.num_triplets_validate, desc='evaluating')
+                    rank = 0
+                    for triplet_validate in dataset.triplets_validate:
+                        feed_dict_eval = {
+                            id_triplets_validate: dataset.next_batch_eval(triplet_validate)
+                        }
+                        # list of dissimilarity, dissimilarity[0] is the dissimilarity of the valid triplet
+                        dissimilarity = sess.run([eval_op], feed_dict=feed_dict_eval)
+                        # sort the list, get the rank
+                        rank += dissimilarity[0].argsort().argmin()
+
+                        progressbar_eval.update()
+
+                    mean_rank = rank / dataset.num_triplets_validate
+                    progressbar_eval.close()
+
+                    print('mean rank at epoch {}, batch {}: {}'.format(epoch, batch, mean_rank))
 
                 # update batch progressbar
                 progressbar_batch.set_description(desc='last batch loss: {:.3f}'.format(loss_batch))

@@ -9,25 +9,21 @@ class TransE:
                  batch_size,
                  num_epoch,
                  margin,
-                 embedding_dimension,
-                 num_entity,
-                 num_relation):
+                 embedding_dimension):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epoch = num_epoch
         self.margin = margin
         self.embedding_dimension = embedding_dimension
-        self.num_entity = num_entity
-        self.num_relation = num_relation
 
-    def inference(self, id_triplet_positive, id_triplet_negative):
+    def inference(self, id_triplet_positive, id_triplet_negative, num_entity, num_relation):
         minval = -6 / math.sqrt(self.embedding_dimension)
         maxval = 6 / math.sqrt(self.embedding_dimension)
         with tf.variable_scope('embedding'):
             embedding_entity = tf.get_variable(
                 name='entity',
                 initializer=tf.random_uniform(
-                    shape=[self.num_entity, self.embedding_dimension],
+                    shape=[num_entity, self.embedding_dimension],
                     minval=minval,
                     maxval=maxval
                 )
@@ -35,7 +31,7 @@ class TransE:
             embedding_relation = tf.get_variable(
                 name='relation',
                 initializer=tf.random_uniform(
-                    shape=[self.num_relation, self.embedding_dimension],
+                    shape=[num_relation, self.embedding_dimension],
                     minval=minval,
                     maxval=maxval
                 )
@@ -71,17 +67,17 @@ class TransE:
 
         return train_op
 
-    def evaluation(self, id_triplet_validate):
-        with tf.variable_scope('embedding', reuse=True):
+    def evaluation(self, id_triplets_validate):
+        # get one single validate triplet and do evaluation
+        with tf.variable_scope('embedding', reuse=True):  # reusing variables: reuse=True
             embedding_entity = tf.get_variable(name='entity')
             embedding_relation = tf.get_variable(name='relation')
 
-        embedding_head = tf.nn.embedding_lookup(embedding_entity, id_triplet_validate[:, 0])
-        embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplet_validate[:, 1])
-        embedding_tail = tf.nn.embedding_lookup(embedding_entity, id_triplet_validate[:, 2])
-
+        # calculate rank
+        embedding_head = tf.nn.embedding_lookup(embedding_entity, id_triplets_validate[:, 0])
+        embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplets_validate[:, 1])
+        embedding_tail = tf.nn.embedding_lookup(embedding_entity, id_triplets_validate[:, 2])
         dissimilarity = tf.sqrt(tf.reduce_sum(tf.square(embedding_head + embedding_relation
-                                                        - embedding_tail)))
+                                                        - embedding_tail), reduction_indices=1))
 
         return dissimilarity
-

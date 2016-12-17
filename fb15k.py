@@ -144,7 +144,24 @@ class DataSet:
 
         return batch_positive, batch_negative
 
-    def next_batch_validate(self, batch_size):
-        batch = random.sample(self.triplets_validate, batch_size)
+    def next_batch_eval(self, triplet_validate):
+        # construct a eval batch, consisting with a valid triplet
+        # and two lists of corrupted triplets constructed by
+        # replacing heads and tails
+        batch_eval = [triplet_validate]
 
-        return batch
+        triplets_corrupted = []
+
+        # replacing head
+        id_heads_corrupted = set(self.id_to_entity.keys())
+        id_heads_corrupted.remove(triplet_validate[0])  # remove the valid head
+        triplets_corrupted.extend([(head, triplet_validate[1], triplet_validate[2]) for head in id_heads_corrupted])
+
+        # replacing tail
+        id_tails_corrupted = set(self.id_to_entity.keys())
+        id_tails_corrupted.remove(triplet_validate[2])  # remove the valid tail
+        triplets_corrupted.extend([(triplet_validate[0], triplet_validate[1], tail) for tail in id_tails_corrupted])
+
+        batch_eval.extend(triplets_corrupted)
+
+        return batch_eval
