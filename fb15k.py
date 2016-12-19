@@ -126,10 +126,11 @@ class DataSet:
             id_head_corrupted = id_head
             id_tail_corrupted = id_tail
 
-            head_prob = binomial(1, 0.5)  # default: unif
-            if self.negative_sampling == 'bern':  # bern
+            if self.negative_sampling == 'bern':
                 hpt, tph = self.relation_dist[id_relation]
                 head_prob = binomial(1, (tph / (tph + hpt)))
+            else:
+                head_prob = binomial(1, 0.5)  # default: unif
 
             # corrupt head or tail, but not both
             while True:

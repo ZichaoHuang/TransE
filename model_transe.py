@@ -9,14 +9,18 @@ class TransE:
                  batch_size,
                  num_epoch,
                  margin,
-                 embedding_dimension):
+                 embedding_dimension,
+                 dissimilarity,
+                 validate_size):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epoch = num_epoch
         self.margin = margin
         self.embedding_dimension = embedding_dimension
+        self.dissimilarity = dissimilarity
+        self.validate_size = validate_size
 
-    def inference(self, id_triplet_positive, id_triplet_negative, num_entity, num_relation):
+    def inference(self, id_triplets_positive, id_triplets_negative, num_entity, num_relation):
         minval = -6 / math.sqrt(self.embedding_dimension)
         maxval = 6 / math.sqrt(self.embedding_dimension)
         with tf.variable_scope('embedding'):
@@ -40,17 +44,22 @@ class TransE:
             embedding_relation = tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1)
 
         # embedding lookup, normalize entity embeddings but not relation ones
-        embedding_head_positive = tf.nn.embedding_lookup(embedding_entity, id_triplet_positive[:, 0], max_norm=1)
-        embedding_head_negative = tf.nn.embedding_lookup(embedding_entity, id_triplet_negative[:, 0], max_norm=1)
-        embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplet_positive[:, 1])
-        embedding_tail_positive = tf.nn.embedding_lookup(embedding_entity, id_triplet_positive[:, 2], max_norm=1)
-        embedding_tail_negative = tf.nn.embedding_lookup(embedding_entity, id_triplet_negative[:, 2], max_norm=1)
+        embedding_head_positive = tf.nn.embedding_lookup(embedding_entity, id_triplets_positive[:, 0], max_norm=1)
+        embedding_head_negative = tf.nn.embedding_lookup(embedding_entity, id_triplets_negative[:, 0], max_norm=1)
+        embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplets_positive[:, 1])
+        embedding_tail_positive = tf.nn.embedding_lookup(embedding_entity, id_triplets_positive[:, 2], max_norm=1)
+        embedding_tail_negative = tf.nn.embedding_lookup(embedding_entity, id_triplets_negative[:, 2], max_norm=1)
 
-        # dissimilarity calculation, using euclidean distance
-        d_positive = tf.sqrt(tf.reduce_sum(tf.square(embedding_head_positive + embedding_relation
-                                                     - embedding_tail_positive), axis=1))
-        d_negative = tf.sqrt(tf.reduce_sum(tf.square(embedding_head_negative + embedding_relation
-                                                     - embedding_tail_negative), axis=1))
+        if self.dissimilarity == 'L2':
+            d_positive = tf.sqrt(tf.reduce_sum(tf.square(embedding_head_positive + embedding_relation
+                                                         - embedding_tail_positive), axis=1))
+            d_negative = tf.sqrt(tf.reduce_sum(tf.square(embedding_head_negative + embedding_relation
+                                                         - embedding_tail_negative), axis=1))
+        else:  # default: L1
+            d_positive = tf.reduce_sum(tf.abs(embedding_head_positive + embedding_relation
+                                              - embedding_tail_positive), axis=1)
+            d_negative = tf.reduce_sum(tf.abs(embedding_head_negative + embedding_relation
+                                              - embedding_tail_negative), axis=1)
 
         return d_positive, d_negative
 
@@ -58,11 +67,11 @@ class TransE:
         return tf.reduce_sum(tf.nn.relu(tf.constant(self.margin) + d_positive - d_negative), name='max_margin_loss')
 
     def train(self, loss):
-        # # add a scalar summary for the snapshot loss
-        # tf.scalar_summary(loss.op.name, loss)
+        # add a scalar summary for the snapshot loss
+        tf.scalar_summary(loss.op.name, loss)
 
-        # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast by using this
+        optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
+        # optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast by using this
         train_op = optimizer.minimize(loss)
 
         return train_op
@@ -73,11 +82,14 @@ class TransE:
             embedding_entity = tf.get_variable(name='entity')
             embedding_relation = tf.get_variable(name='relation')
 
-        # calculate rank
         embedding_head = tf.nn.embedding_lookup(embedding_entity, id_triplets_validate[:, 0])
         embedding_relation = tf.nn.embedding_lookup(embedding_relation, id_triplets_validate[:, 1])
         embedding_tail = tf.nn.embedding_lookup(embedding_entity, id_triplets_validate[:, 2])
-        dissimilarity = tf.sqrt(tf.reduce_sum(tf.square(embedding_head + embedding_relation
-                                                        - embedding_tail), reduction_indices=1))
+
+        if self.dissimilarity == 'L2':
+            dissimilarity = tf.sqrt(tf.reduce_sum(tf.square(embedding_head + embedding_relation
+                                                            - embedding_tail), axis=1))
+        else:
+            dissimilarity = tf.reduce_sum(tf.abs(embedding_head + embedding_relation - embedding_tail), axis=1)
 
         return dissimilarity

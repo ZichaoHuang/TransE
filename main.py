@@ -1,10 +1,10 @@
 from fb15k import DataSet
 from model_transe import TransE
 
-import numpy as np
+import random
 import argparse
+import time
 from os import path
-from tqdm import tqdm
 import tensorflow as tf
 
 
@@ -15,14 +15,16 @@ def run_training(args):
                    batch_size=args.batch_size,
                    num_epoch=args.num_epoch,
                    margin=args.margin,
-                   embedding_dimension=args.embedding_dimension)
+                   embedding_dimension=args.embedding_dimension,
+                   dissimilarity=args.dissimilarity,
+                   validate_size=args.validate_size)
 
     # construct the training graph
     graph_transe_training = tf.Graph()
     with graph_transe_training.as_default():
         print('constructing the training graph...')
         # generate placeholders for the graph
-        with tf.variable_scope('id'):
+        with tf.variable_scope('input'):
             id_triplets_positive = tf.placeholder(
                 dtype=tf.int32,
                 shape=[model.batch_size, 3],
@@ -39,89 +41,103 @@ def run_training(args):
                 name='triplet_validate'
             )
 
-        # model inference
-        d_positive, d_negative = model.inference(id_triplets_positive, id_triplets_negative,
-                                                 dataset.num_entity, dataset.num_relation)
-        # model train loss
-        loss = model.loss(d_positive, d_negative)
-        # model train operation
-        train_op = model.train(loss)
-        # model evaluation
-        eval_op = model.evaluation(id_triplets_validate)
+        # ops into scopes, convenient for TensorBoard's Graph visualization
+        with tf.name_scope('inference'):
+            # model inference
+            d_positive, d_negative = model.inference(id_triplets_positive, id_triplets_negative,
+                                                     dataset.num_entity, dataset.num_relation)
+        with tf.name_scope('loss'):
+            # model train loss
+            loss = model.loss(d_positive, d_negative)
+        with tf.name_scope('optimize'):
+            # model train operation
+            train_op = model.train(loss)
+        with tf.name_scope('evaluate'):
+            # model evaluation
+            eval_op = model.evaluation(id_triplets_validate)
         print('graph constructing finished')
 
+        merge_summary_op = tf.merge_all_summaries()
+
     # open a session and run the training graph
-    with tf.Session(graph=graph_transe_training) as sess:
-        # saver for writing training checkpoints
-        saver = tf.train.Saver()
-        checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model')
+    session_config = tf.ConfigProto(log_device_placement=False)
+    session_config.gpu_options.allow_growth = True
+    with tf.Session(graph=graph_transe_training, config=session_config) as sess:
+        # # saver for writing training checkpoints
+        # saver = tf.train.Saver()
+        # checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model')
 
         # run the initial operation
         print('initializing all variables...')
         sess.run(tf.global_variables_initializer())
         print('all variables initialized')
 
+        # op to write logs to tensorboard
+        summary_writer = tf.train.SummaryWriter(args.log_dir, graph=sess.graph)
+
         num_batch = dataset.num_triplets_train // model.batch_size
 
         # training
         print('start training...')
-        progressbar_epoch = tqdm(total=model.num_epoch, desc='epoch training')
+        start_total = time.time()
         for epoch in range(model.num_epoch):
             loss_epoch = 0
-            progressbar_batch = tqdm(total=num_batch, desc='batch training', leave=False)
+            start = time.time()
             for batch in range(num_batch):
                 batch_positive, batch_negative = dataset.next_batch(model.batch_size)
                 feed_dict_train = {
                     id_triplets_positive: batch_positive,
                     id_triplets_negative: batch_negative
                 }
-                # run the graph
-                _, loss_batch = sess.run([train_op, loss], feed_dict=feed_dict_train)
+                # run the optimize op, loss op and summary op
+                _, loss_batch, summary = sess.run([train_op, loss, merge_summary_op], feed_dict=feed_dict_train)
                 loss_epoch += loss_batch
+
+                # write tensorboard logs
+                summary_writer.add_summary(summary, global_step=epoch * num_batch + batch)
+
+                # print an overview of training every 100 steps
+                if batch % 100 == 0:
+                    print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
 
                 # save a checkpoint and evaluate the model periodically
                 if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
-                    # save a checkpoint
-                    save_path = saver.save(
-                        sess=sess,
-                        save_path=checkpoint_path,
-                        global_step=batch
-                    )
-                    print('\nmodel save at path: {}'.format(save_path))
+                    # # save a checkpoint
+                    # save_path = saver.save(
+                    #     sess=sess,
+                    #     save_path=checkpoint_path,
+                    #     global_step=batch
+                    # )
+                    # print('model save at: {}'.format(save_path))
 
                     # evaluate the model
                     print('evaluating the current model...')
-                    progressbar_eval = tqdm(total=dataset.num_triplets_validate, desc='evaluating')
                     rank = 0
-                    for triplet_validate in dataset.triplets_validate:
+                    for triplet_validate in random.sample(dataset.triplets_validate, model.validate_size):
                         feed_dict_eval = {
                             id_triplets_validate: dataset.next_batch_eval(triplet_validate)
                         }
-                        # list of dissimilarity, dissimilarity[0] is the dissimilarity of the valid triplet
-                        dissimilarity = sess.run([eval_op], feed_dict=feed_dict_eval)
-                        # sort the list, get the rank
-                        rank += dissimilarity[0].argsort().argmin()
-
-                        progressbar_eval.update()
-
-                    mean_rank = rank / dataset.num_triplets_validate
-                    progressbar_eval.close()
-
-                    print('mean rank at epoch {}, batch {}: {}'.format(epoch, batch, mean_rank))
-
-                # update batch progressbar
-                progressbar_batch.set_description(desc='last batch loss: {:.3f}'.format(loss_batch))
-                progressbar_batch.update()
-            progressbar_batch.close()
-
-            # update epoch progressbar
-            progressbar_epoch.set_description(desc='last epoch loss: {:.3f}'.format(loss_epoch))
-            progressbar_epoch.update()
-        progressbar_epoch.close()
+                        # list of dissimilarity, the first element in the list is the dissimilarity of the valid triplet
+                        dissimilarity = sess.run(eval_op, feed_dict=feed_dict_eval)
+                        # sort the list, get the rank of dissimilarity[0], which is argmin()
+                        rank += dissimilarity.argsort().argmin()
+                    mean_rank = int(rank / model.validate_size)
+                    print('epoch {}, batch {}, mean rank: {:d}'.format(epoch, batch, mean_rank))
+                    print('back to training...')
+            end = time.time()
+            print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}'.format(
+                epoch,
+                loss_epoch / num_batch,
+                end - start
+            ))
+        end_total = time.time()
+        print('total time elapsed: {:.3f}s'.format(end_total - start_total))
+        print('training finished')
 
 
 def main():
     parser = argparse.ArgumentParser()
+    # dataset args
     parser.add_argument(
         '--data_dir',
         type=str,
@@ -134,6 +150,8 @@ def main():
         default='unif',
         help='negative sampling method, unif or bern'
     )
+
+    # model args
     parser.add_argument(
         '--learning_rate',
         type=float,
@@ -153,16 +171,36 @@ def main():
         help='number of epochs'
     )
     parser.add_argument(
-        '--embedding_dimension',
-        type=int,
-        default=100,
-        help='dimension of entity and relation embeddings'
-    )
-    parser.add_argument(
         '--margin',
         type=float,
         default=1.0,
         help='margin of a golden triplet and a corrupted one'
+    )
+    parser.add_argument(
+        '--embedding_dimension',
+        type=int,
+        default=50,
+        help='dimension of entity and relation embeddings'
+    )
+    parser.add_argument(
+        '--dissimilarity',
+        type=str,
+        default='L1',
+        help='using L1 or L2 distance as dissimilarity'
+    )
+    parser.add_argument(
+        '--validate_size',
+        type=int,
+        default=1000,
+        help='the size of validation set, max is 50000'
+    )
+
+    # tensorboard args
+    parser.add_argument(
+        '--log_dir',
+        type=str,
+        default='log/',
+        help='tensorflow log files directory, for tensorboard'
     )
 
     args = parser.parse_args()
