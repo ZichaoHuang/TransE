@@ -116,7 +116,7 @@ class DataSet:
             )
         ))
 
-    def next_batch(self, batch_size):
+    def next_batch_train(self, batch_size):
         # construct positive batch
         batch_positive = random.sample(self.triplets_train, batch_size)
 
@@ -144,6 +144,12 @@ class DataSet:
             batch_negative.append((id_head_corrupted, id_relation, id_tail_corrupted))
 
         return batch_positive, batch_negative
+
+    def next_batch_validate(self, batch_size):
+        batch_validate = random.sample(self.triplets_validate, batch_size)
+
+        return batch_validate
+
 
     def next_batch_eval(self, triplet_validate):
         # construct a eval batch, consisting with a valid triplet

@@ -4,7 +4,9 @@ from model_transe import TransE
 import random
 import argparse
 import time
+import math
 from os import path
+import numpy as np
 import tensorflow as tf
 
 
@@ -23,6 +25,7 @@ def run_training(args):
     graph_transe_training = tf.Graph()
     with graph_transe_training.as_default():
         print('constructing the training graph...')
+
         # generate placeholders for the graph
         with tf.variable_scope('input'):
             id_triplets_positive = tf.placeholder(
@@ -41,11 +44,30 @@ def run_training(args):
                 name='triplet_validate'
             )
 
+        # embedding table
+        bound = 6 / math.sqrt(model.embedding_dimension)
+        with tf.variable_scope('embedding'):
+            embedding_entity = tf.get_variable(
+                name='entity',
+                initializer=tf.random_uniform(
+                    shape=[dataset.num_entity, model.embedding_dimension],
+                    minval=-bound,
+                    maxval=bound
+                )
+            )
+            embedding_relation = tf.get_variable(
+                name='relation',
+                initializer=tf.random_uniform(
+                    shape=[dataset.num_relation, model.embedding_dimension],
+                    minval=-bound,
+                    maxval=bound
+                )
+            )
+
         # ops into scopes, convenient for TensorBoard's Graph visualization
         with tf.name_scope('inference'):
             # model inference
-            d_positive, d_negative = model.inference(id_triplets_positive, id_triplets_negative,
-                                                     dataset.num_entity, dataset.num_relation)
+            d_positive, d_negative = model.inference(id_triplets_positive, id_triplets_negative)
         with tf.name_scope('loss'):
             # model train loss
             loss = model.loss(d_positive, d_negative)
@@ -72,6 +94,10 @@ def run_training(args):
         sess.run(tf.global_variables_initializer())
         print('all variables initialized')
 
+        # normalize relation embeddings after initialization
+        normalize_relation_op = embedding_relation.assign(tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1))
+        sess.run(normalize_relation_op)
+
         # op to write logs to tensorboard
         summary_writer = tf.train.SummaryWriter(args.log_dir, graph=sess.graph)
 
@@ -84,11 +110,31 @@ def run_training(args):
             loss_epoch = 0
             start = time.time()
             for batch in range(num_batch):
-                batch_positive, batch_negative = dataset.next_batch(model.batch_size)
+                # normalize entity embeddings before every batch
+                normalize_entity_op = embedding_entity.assign(tf.clip_by_norm(embedding_entity, clip_norm=1, axes=1))
+                sess.run(normalize_entity_op)
+
+                batch_positive, batch_negative = dataset.next_batch_train(model.batch_size)
                 feed_dict_train = {
                     id_triplets_positive: batch_positive,
                     id_triplets_negative: batch_negative
                 }
+
+                # # initial embedding norm check
+                # if batch == 0:
+                #     # check embedding norm
+                #     entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
+                #
+                #     print('initial value:')
+                #     print('entity norm:')
+                #     print(np.linalg.norm(entity, ord=2, axis=1))
+                #     print('relation norm:')
+                #     print(np.linalg.norm(relation, ord=2, axis=1))
+                #     # print('entity embedding:')
+                #     # print(entity)
+                #     # print('relation embeddings:')
+                #     # print(relation)
+
                 # run the optimize op, loss op and summary op
                 _, loss_batch, summary = sess.run([train_op, loss, merge_summary_op], feed_dict=feed_dict_train)
                 loss_epoch += loss_batch
@@ -99,6 +145,18 @@ def run_training(args):
                 # print an overview of training every 100 steps
                 if batch % 100 == 0:
                     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
+
+                    # # check embedding norm
+                    # entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
+                    #
+                    # print('entity norm:')
+                    # print(np.linalg.norm(entity, ord=2, axis=1))
+                    # print('relation norm:')
+                    # print(np.linalg.norm(relation, ord=2, axis=1))
+                    # # print('entity embedding:')
+                    # # print(entity)
+                    # # print('relation embedding:')
+                    # # print(relation)
 
                 # save a checkpoint and evaluate the model periodically
                 if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
