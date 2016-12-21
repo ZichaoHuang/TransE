@@ -25,17 +25,23 @@ class TransE:
         return d_positive, d_negative
 
     def loss(self, d_positive, d_negative):
-        return tf.reduce_sum(tf.nn.relu(tf.constant(self.margin) + d_positive - d_negative), name='max_margin_loss')
+        margin = tf.constant(
+            self.margin,
+            dtype=tf.float32,
+            shape=[self.batch_size],
+            name='margin'
+        )
+        loss = tf.reduce_sum(tf.nn.relu(margin + d_positive - d_negative), name='max_margin_loss')
+        return loss
 
     def train(self, loss):
         # add a scalar summary for the snapshot loss
         tf.scalar_summary(loss.op.name, loss)
 
         # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)  # loss drop really fast by using this
+        # optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+        optimizer = tf.train.AdamOptimizer()  # loss drop really fast by using this
         train_op = optimizer.minimize(loss)
-        # grads_and_vars = optimizer.compute_gradients(loss)
-        # train_op = optimizer.apply_gradients(grads_and_vars)
 
         return train_op
 

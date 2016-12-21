@@ -150,7 +150,6 @@ class DataSet:
 
         return batch_validate
 
-
     def next_batch_eval(self, triplet_validate):
         # construct a eval batch, consisting with a valid triplet
         # and two lists of corrupted triplets constructed by

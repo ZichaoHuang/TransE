@@ -64,6 +64,12 @@ def run_training(args):
                 )
             )
 
+        with tf.name_scope('normalization'):
+            normalize_relation_op = embedding_relation.assign(tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1,
+                                                                              name='relation'))
+            normalize_entity_op = embedding_entity.assign(tf.clip_by_norm(embedding_entity, clip_norm=1, axes=1,
+                                                                          name='entity'))
+
         # ops into scopes, convenient for TensorBoard's Graph visualization
         with tf.name_scope('inference'):
             # model inference
@@ -71,13 +77,16 @@ def run_training(args):
         with tf.name_scope('loss'):
             # model train loss
             loss = model.loss(d_positive, d_negative)
-        with tf.name_scope('optimize'):
+        with tf.name_scope('optimization'):
             # model train operation
             train_op = model.train(loss)
-        with tf.name_scope('evaluate'):
+        with tf.name_scope('evaluation'):
             # model evaluation
             eval_op = model.evaluation(id_triplets_validate)
         print('graph constructing finished')
+
+        # initialize op
+        init_op = tf.global_variables_initializer()
 
         merge_summary_op = tf.merge_all_summaries()
 
@@ -91,11 +100,10 @@ def run_training(args):
 
         # run the initial operation
         print('initializing all variables...')
-        sess.run(tf.global_variables_initializer())
+        sess.run(init_op)
         print('all variables initialized')
 
         # normalize relation embeddings after initialization
-        normalize_relation_op = embedding_relation.assign(tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1))
         sess.run(normalize_relation_op)
 
         # op to write logs to tensorboard
@@ -111,7 +119,6 @@ def run_training(args):
             start = time.time()
             for batch in range(num_batch):
                 # normalize entity embeddings before every batch
-                normalize_entity_op = embedding_entity.assign(tf.clip_by_norm(embedding_entity, clip_norm=1, axes=1))
                 sess.run(normalize_entity_op)
 
                 batch_positive, batch_negative = dataset.next_batch_train(model.batch_size)
@@ -128,12 +135,15 @@ def run_training(args):
                 #     print('initial value:')
                 #     print('entity norm:')
                 #     print(np.linalg.norm(entity, ord=2, axis=1))
+                #     print(np.linalg.norm(entity, ord=2, axis=0))
                 #     print('relation norm:')
                 #     print(np.linalg.norm(relation, ord=2, axis=1))
-                #     # print('entity embedding:')
-                #     # print(entity)
-                #     # print('relation embeddings:')
-                #     # print(relation)
+                #     print(np.linalg.norm(relation, ord=2, axis=0))
+                #     print('entity embedding:')
+                #     print(entity)
+                #     print('relation embeddings:')
+                #     print(relation)
+                #     print()
 
                 # run the optimize op, loss op and summary op
                 _, loss_batch, summary = sess.run([train_op, loss, merge_summary_op], feed_dict=feed_dict_train)
@@ -142,24 +152,28 @@ def run_training(args):
                 # write tensorboard logs
                 summary_writer.add_summary(summary, global_step=epoch * num_batch + batch)
 
-                # print an overview of training every 100 steps
-                if batch % 100 == 0:
+                # # print an overview of training every 100 steps
+                # if batch % 100 == 0:
+                #     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
+
+                #     # check embedding norm
+                #     entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
+                #
+                #     print('entity norm:')
+                #     print(np.linalg.norm(entity, ord=2, axis=1))
+                #     print(np.linalg.norm(entity, ord=2, axis=0))
+                #     print('relation norm:')
+                #     print(np.linalg.norm(relation, ord=2, axis=1))
+                #     print(np.linalg.norm(relation, ord=2, axis=0))
+                #     print('entity embedding:')
+                #     print(entity)
+                #     print('relation embedding:')
+                #     print(relation)
+                #     print()
+
+                # print an overview, save a checkpoint and evaluate the model periodically
+                if (batch + 1) % 10 == 0 or (batch + 1) == num_batch:
                     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
-
-                    # # check embedding norm
-                    # entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
-                    #
-                    # print('entity norm:')
-                    # print(np.linalg.norm(entity, ord=2, axis=1))
-                    # print('relation norm:')
-                    # print(np.linalg.norm(relation, ord=2, axis=1))
-                    # # print('entity embedding:')
-                    # # print(entity)
-                    # # print('relation embedding:')
-                    # # print(relation)
-
-                # save a checkpoint and evaluate the model periodically
-                if (batch + 1) % 1000 == 0 or (batch + 1) == num_batch:
                     # # save a checkpoint
                     # save_path = saver.save(
                     #     sess=sess,
@@ -180,7 +194,7 @@ def run_training(args):
                         # sort the list, get the rank of dissimilarity[0], which is argmin()
                         rank += dissimilarity.argsort().argmin()
                     mean_rank = int(rank / model.validate_size)
-                    print('epoch {}, batch {}, mean rank: {:d}'.format(epoch, batch, mean_rank))
+                    print('mean rank: {:d}'.format(mean_rank))
                     print('back to training...')
             end = time.time()
             print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}'.format(
@@ -219,8 +233,8 @@ def main():
     parser.add_argument(
         '--batch_size',
         type=int,
-        default=100,
-        help='mini-batch size for SGD'
+        default=5000,
+        help='mini-batch size for optimization'
     )
     parser.add_argument(
         '--num_epoch',
