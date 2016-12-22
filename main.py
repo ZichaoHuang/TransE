@@ -141,7 +141,7 @@ def run_training(args):
             end_train = time.time()
             print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}s'.format(
                 epoch,
-                loss_epoch / args.num_batch,
+                loss_epoch / num_batch,
                 end_train - start_train
             ))
 
