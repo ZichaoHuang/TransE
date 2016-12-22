@@ -13,13 +13,15 @@ import tensorflow as tf
 def run_training(args):
     dataset = DataSet(data_dir=args.data_dir,
                       negative_sampling=args.negative_sampling)
+
+    batch_size = dataset.num_triplets_train // args.num_batch
     model = TransE(learning_rate=args.learning_rate,
-                   batch_size=args.batch_size,
+                   batch_size=batch_size,
                    num_epoch=args.num_epoch,
                    margin=args.margin,
                    embedding_dimension=args.embedding_dimension,
                    dissimilarity=args.dissimilarity,
-                   validate_size=args.validate_size)
+                   evaluate_size=args.evaluate_size)
 
     # construct the training graph
     graph_transe_training = tf.Graph()
@@ -38,10 +40,15 @@ def run_training(args):
                 shape=[model.batch_size, 3],
                 name='triplets_negative'
             )
-            id_triplets_validate = tf.placeholder(
+            id_triplets_predict_head = tf.placeholder(
                 dtype=tf.int32,
-                shape=[2 * dataset.num_entity - 1, 3],  # 2 * (num_entity - 1) + 1
-                name='triplet_validate'
+                shape=[dataset.num_entity, 3],
+                name='triplets_predict_head'
+            )
+            id_triplets_predict_tail = tf.placeholder(
+                dtype=tf.int32,
+                shape=[dataset.num_entity, 3],
+                name='triplets_predict_tail'
             )
 
         # embedding table
@@ -65,10 +72,8 @@ def run_training(args):
             )
 
         with tf.name_scope('normalization'):
-            normalize_relation_op = embedding_relation.assign(tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1,
-                                                                              name='relation'))
-            normalize_entity_op = embedding_entity.assign(tf.clip_by_norm(embedding_entity, clip_norm=1, axes=1,
-                                                                          name='entity'))
+            normalize_relation_op = embedding_relation.assign(tf.clip_by_norm(embedding_relation, clip_norm=1, axes=1))
+            normalize_entity_op = embedding_entity.assign(tf.clip_by_norm(embedding_entity, clip_norm=1, axes=1))
 
         # ops into scopes, convenient for TensorBoard's Graph visualization
         with tf.name_scope('inference'):
@@ -82,7 +87,7 @@ def run_training(args):
             train_op = model.train(loss)
         with tf.name_scope('evaluation'):
             # model evaluation
-            eval_op = model.evaluation(id_triplets_validate)
+            predict_head, predict_tail = model.evaluation(id_triplets_predict_head, id_triplets_predict_tail)
         print('graph constructing finished')
 
         # initialize op
@@ -109,15 +114,15 @@ def run_training(args):
         # op to write logs to tensorboard
         summary_writer = tf.train.SummaryWriter(args.log_dir, graph=sess.graph)
 
-        num_batch = dataset.num_triplets_train // model.batch_size
+        # num_batch = dataset.num_triplets_train // model.batch_size
 
         # training
         print('start training...')
         start_total = time.time()
         for epoch in range(model.num_epoch):
             loss_epoch = 0
-            start = time.time()
-            for batch in range(num_batch):
+            start_train = time.time()
+            for batch in range(args.num_batch):
                 # normalize entity embeddings before every batch
                 sess.run(normalize_entity_op)
 
@@ -150,7 +155,7 @@ def run_training(args):
                 loss_epoch += loss_batch
 
                 # write tensorboard logs
-                summary_writer.add_summary(summary, global_step=epoch * num_batch + batch)
+                summary_writer.add_summary(summary, global_step=epoch * args.num_batch + batch)
 
                 # # print an overview of training every 100 steps
                 # if batch % 100 == 0:
@@ -172,7 +177,7 @@ def run_training(args):
                 #     print()
 
                 # print an overview, save a checkpoint and evaluate the model periodically
-                if (batch + 1) % 10 == 0 or (batch + 1) == num_batch:
+                if (batch + 1) % 10 == 0 or (batch + 1) == args.num_batch:
                     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
                     # # save a checkpoint
                     # save_path = saver.save(
@@ -181,30 +186,92 @@ def run_training(args):
                     #     global_step=batch
                     # )
                     # print('model save at: {}'.format(save_path))
-
                     # evaluate the model
-                    print('evaluating the current model...')
-                    rank = 0
-                    for triplet_validate in random.sample(dataset.triplets_validate, model.validate_size):
-                        feed_dict_eval = {
-                            id_triplets_validate: dataset.next_batch_eval(triplet_validate)
-                        }
-                        # list of dissimilarity, the first element in the list is the dissimilarity of the valid triplet
-                        dissimilarity = sess.run(eval_op, feed_dict=feed_dict_eval)
-                        # sort the list, get the rank of dissimilarity[0], which is argmin()
-                        rank += dissimilarity.argsort().argmin()
-                    mean_rank = int(rank / model.validate_size)
-                    print('mean rank: {:d}'.format(mean_rank))
-                    print('back to training...')
-            end = time.time()
-            print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}'.format(
+                    # run_evaluation(sess,
+                    #                predict_head,
+                    #                predict_tail,
+                    #                model,
+                    #                dataset,
+                    #                id_triplets_predict_head,
+                    #                id_triplets_predict_tail)
+
+            end_train = time.time()
+            print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}s'.format(
                 epoch,
-                loss_epoch / num_batch,
-                end - start
+                loss_epoch / args.num_batch,
+                end_train - start_train
             ))
+
+            # evaluate the model
+            run_evaluation(sess,
+                           predict_head,
+                           predict_tail,
+                           model,
+                           dataset,
+                           id_triplets_predict_head,
+                           id_triplets_predict_tail)
+            # print('evaluating the current model...')
+            # start_eval = time.time()
+            # rank = 0
+            # for triplet_validate in random.sample(dataset.triplets_validate, model.validate_size):
+            #     feed_dict_eval = {
+            #         id_triplets_validate: dataset.next_batch_eval(triplet_validate)
+            #     }
+            #     # list of dissimilarity, the first element in the list is the dissimilarity of the valid triplet
+            #     dissimilarity = sess.run(eval_op, feed_dict=feed_dict_eval)
+            #     # sort the list, get the rank of dissimilarity[0], which is argmin()
+            #     rank += dissimilarity.argsort().argmin()
+            # mean_rank = rank // model.validate_size
+            # end_eval = time.time()
+            # print('mean rank: {:d}, time elapsed last evaluation: {:.3f}s'.format(mean_rank, end_eval - start_eval))
+            # print('back to training...')
+
         end_total = time.time()
         print('total time elapsed: {:.3f}s'.format(end_total - start_total))
         print('training finished')
+
+
+def run_evaluation(sess,
+                   predict_head,
+                   predict_tail,
+                   model,
+                   dataset,
+                   id_triplets_predict_head,
+                   id_triplets_predict_tail):
+    print('evaluating the current model...')
+    start_eval = time.time()
+    rank_head = 0
+    rank_tail = 0
+    hit10_head = 0
+    hit10_tail = 0
+    for triplet in random.sample(dataset.triplets_validate, model.evaluate_size):
+        batch_predict_head, batch_predict_tail = dataset.next_batch_eval(triplet)
+        feed_dict_eval = {
+            id_triplets_predict_head: batch_predict_head,
+            id_triplets_predict_tail: batch_predict_tail
+        }
+        # rank list of head and tail prediction
+        prediction_head, prediction_tail = sess.run([predict_head, predict_tail], feed_dict=feed_dict_eval)
+
+        rank_head_current = prediction_head.argsort().argmin()
+        rank_head += rank_head_current
+        if rank_head_current < 10:
+            hit10_head += 1
+
+        rank_tail_current = prediction_tail.argsort().argmin()
+        rank_tail += rank_tail_current
+        if rank_tail_current < 10:
+            hit10_tail += 1
+
+    rank_head_mean = rank_head // model.evaluate_size
+    hit10_head /= model.evaluate_size
+    rank_tail_mean = rank_tail // model.evaluate_size
+    hit10_tail /= model.evaluate_size
+    end_eval = time.time()
+    print('head prediction mean rank: {:d}, hit@10: {:.3f}%'.format(rank_head_mean, hit10_head * 100))
+    print('tail prediction mean rank: {:d}, hit@10: {:.3f}%'.format(rank_tail_mean, hit10_tail * 100))
+    print('time elapsed last evaluation: {:.3f}s'.format(end_eval - start_eval))
+    print('back to training...')
 
 
 def main():
@@ -219,7 +286,7 @@ def main():
     parser.add_argument(
         '--negative_sampling',
         type=str,
-        default='unif',
+        default='bern',
         help='negative sampling method, unif or bern'
     )
 
@@ -227,14 +294,14 @@ def main():
     parser.add_argument(
         '--learning_rate',
         type=float,
-        default=0.01,
+        default=0.001,
         help='initial learning rate'
     )
     parser.add_argument(
-        '--batch_size',
+        '--num_batch',
         type=int,
-        default=5000,
-        help='mini-batch size for optimization'
+        default=100,
+        help='number of batches every epoch, batch_size = num_triplets_train // num_batch'
     )
     parser.add_argument(
         '--num_epoch',
@@ -261,10 +328,10 @@ def main():
         help='using L1 or L2 distance as dissimilarity'
     )
     parser.add_argument(
-        '--validate_size',
+        '--evaluate_size',
         type=int,
-        default=1000,
-        help='the size of validation set, max is 50000'
+        default=500,
+        help='the size of evaluate triplets, max is 50000'
     )
 
     # tensorboard args
@@ -276,6 +343,7 @@ def main():
     )
 
     args = parser.parse_args()
+    print('args: {}'.format(args))
     run_training(args=args)
 
 

@@ -9,14 +9,14 @@ class TransE:
                  margin,
                  embedding_dimension,
                  dissimilarity,
-                 validate_size):
+                 evaluate_size):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epoch = num_epoch
         self.margin = margin
         self.embedding_dimension = embedding_dimension
         self.dissimilarity = dissimilarity
-        self.validate_size = validate_size
+        self.evaluate_size = evaluate_size
 
     def inference(self, id_triplets_positive, id_triplets_negative):
         d_positive = self.get_dissimilarity(id_triplets_positive)
@@ -38,9 +38,9 @@ class TransE:
         # add a scalar summary for the snapshot loss
         tf.scalar_summary(loss.op.name, loss)
 
-        # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
+        optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
         # optimizer = tf.train.AdagradOptimizer(self.learning_rate)
-        optimizer = tf.train.AdamOptimizer()  # loss drop really fast by using this
+        # optimizer = tf.train.AdamOptimizer()  # loss drop really fast by using this
         train_op = optimizer.minimize(loss)
 
         return train_op
@@ -59,13 +59,14 @@ class TransE:
         if self.dissimilarity == 'L2':
             dissimilarity = tf.sqrt(tf.reduce_sum(tf.square(embedding_head + embedding_relation
                                                             - embedding_tail), axis=1))
-        else:
+        else:  # default: L1
             dissimilarity = tf.reduce_sum(tf.abs(embedding_head + embedding_relation - embedding_tail), axis=1)
 
         return dissimilarity
 
-    def evaluation(self, id_triplets_validate):
+    def evaluation(self, id_triplets_predict_head, id_triplets_predict_tail):
         # get one single validate triplet and do evaluation
-        dissimilarity = self.get_dissimilarity(id_triplets_validate)
+        prediction_head = self.get_dissimilarity(id_triplets_predict_head)
+        prediction_tail = self.get_dissimilarity(id_triplets_predict_tail)
 
-        return dissimilarity
+        return prediction_head, prediction_tail

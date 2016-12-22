@@ -126,11 +126,11 @@ class DataSet:
             id_head_corrupted = id_head
             id_tail_corrupted = id_tail
 
-            if self.negative_sampling == 'bern':
+            if self.negative_sampling == 'unif':
+                head_prob = binomial(1, 0.5)
+            else:  # default: bern
                 hpt, tph = self.relation_dist[id_relation]
                 head_prob = binomial(1, (tph / (tph + hpt)))
-            else:
-                head_prob = binomial(1, 0.5)  # default: unif
 
             # corrupt head or tail, but not both
             while True:
@@ -150,24 +150,37 @@ class DataSet:
 
         return batch_validate
 
-    def next_batch_eval(self, triplet_validate):
-        # construct a eval batch, consisting with a valid triplet
-        # and two lists of corrupted triplets constructed by
-        # replacing heads and tails
-        batch_eval = [triplet_validate]
-
-        triplets_corrupted = []
-
+    def next_batch_eval(self, triplet_evaluate):
+        # construct two batches for head and tail prediction
+        batch_predict_head = [triplet_evaluate]
         # replacing head
         id_heads_corrupted = set(self.id_to_entity.keys())
-        id_heads_corrupted.remove(triplet_validate[0])  # remove the valid head
-        triplets_corrupted.extend([(head, triplet_validate[1], triplet_validate[2]) for head in id_heads_corrupted])
+        id_heads_corrupted.remove(triplet_evaluate[0])  # remove the golden head
+        batch_predict_head.extend([(head, triplet_evaluate[1], triplet_evaluate[2]) for head in id_heads_corrupted])
 
+        batch_predict_tail = [triplet_evaluate]
         # replacing tail
         id_tails_corrupted = set(self.id_to_entity.keys())
-        id_tails_corrupted.remove(triplet_validate[2])  # remove the valid tail
-        triplets_corrupted.extend([(triplet_validate[0], triplet_validate[1], tail) for tail in id_tails_corrupted])
+        id_tails_corrupted.remove(triplet_evaluate[2])  # remove the golden tail
+        batch_predict_tail.extend([(triplet_evaluate[0], triplet_evaluate[1], tail) for tail in id_tails_corrupted])
 
-        batch_eval.extend(triplets_corrupted)
+        # # construct a eval batch, consisting with a valid triplet
+        # # and two lists of corrupted triplets constructed by
+        # # replacing heads and tails
+        # batch_eval = [triplet_evaluate]
+        #
+        # triplets_corrupted = []
+        #
+        # # replacing head
+        # id_heads_corrupted = set(self.id_to_entity.keys())
+        # id_heads_corrupted.remove(triplet_evaluate[0])  # remove the valid head
+        # triplets_corrupted.extend([(head, triplet_evaluate[1], triplet_evaluate[2]) for head in id_heads_corrupted])
+        #
+        # # replacing tail
+        # id_tails_corrupted = set(self.id_to_entity.keys())
+        # id_tails_corrupted.remove(triplet_evaluate[2])  # remove the valid tail
+        # triplets_corrupted.extend([(triplet_evaluate[0], triplet_evaluate[1], tail) for tail in id_tails_corrupted])
+        #
+        # batch_eval.extend(triplets_corrupted)
 
-        return batch_eval
+        return batch_predict_head, batch_predict_tail
