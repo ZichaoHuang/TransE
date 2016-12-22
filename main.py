@@ -5,8 +5,6 @@ import random
 import argparse
 import time
 import math
-from os import path
-import numpy as np
 import tensorflow as tf
 
 
@@ -14,9 +12,8 @@ def run_training(args):
     dataset = DataSet(data_dir=args.data_dir,
                       negative_sampling=args.negative_sampling)
 
-    batch_size = dataset.num_triplets_train // args.num_batch
     model = TransE(learning_rate=args.learning_rate,
-                   batch_size=batch_size,
+                   batch_size=args.batch_size,
                    num_epoch=args.num_epoch,
                    margin=args.margin,
                    embedding_dimension=args.embedding_dimension,
@@ -92,17 +89,13 @@ def run_training(args):
 
         # initialize op
         init_op = tf.global_variables_initializer()
-
+        # merge all the summaries
         merge_summary_op = tf.merge_all_summaries()
 
     # open a session and run the training graph
-    session_config = tf.ConfigProto(log_device_placement=False)
+    session_config = tf.ConfigProto(log_device_placement=True)
     session_config.gpu_options.allow_growth = True
     with tf.Session(graph=graph_transe_training, config=session_config) as sess:
-        # # saver for writing training checkpoints
-        # saver = tf.train.Saver()
-        # checkpoint_path = path.join(dataset.data_dir, 'checkpoint/model')
-
         # run the initial operation
         print('initializing all variables...')
         sess.run(init_op)
@@ -114,7 +107,7 @@ def run_training(args):
         # op to write logs to tensorboard
         summary_writer = tf.train.SummaryWriter(args.log_dir, graph=sess.graph)
 
-        # num_batch = dataset.num_triplets_train // model.batch_size
+        num_batch = dataset.num_triplets_train // model.batch_size
 
         # training
         print('start training...')
@@ -122,7 +115,7 @@ def run_training(args):
         for epoch in range(model.num_epoch):
             loss_epoch = 0
             start_train = time.time()
-            for batch in range(args.num_batch):
+            for batch in range(num_batch):
                 # normalize entity embeddings before every batch
                 sess.run(normalize_entity_op)
 
@@ -132,68 +125,18 @@ def run_training(args):
                     id_triplets_negative: batch_negative
                 }
 
-                # # initial embedding norm check
-                # if batch == 0:
-                #     # check embedding norm
-                #     entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
-                #
-                #     print('initial value:')
-                #     print('entity norm:')
-                #     print(np.linalg.norm(entity, ord=2, axis=1))
-                #     print(np.linalg.norm(entity, ord=2, axis=0))
-                #     print('relation norm:')
-                #     print(np.linalg.norm(relation, ord=2, axis=1))
-                #     print(np.linalg.norm(relation, ord=2, axis=0))
-                #     print('entity embedding:')
-                #     print(entity)
-                #     print('relation embeddings:')
-                #     print(relation)
-                #     print()
-
                 # run the optimize op, loss op and summary op
                 _, loss_batch, summary = sess.run([train_op, loss, merge_summary_op], feed_dict=feed_dict_train)
                 loss_epoch += loss_batch
 
                 # write tensorboard logs
-                summary_writer.add_summary(summary, global_step=epoch * args.num_batch + batch)
+                summary_writer.add_summary(summary, global_step=epoch * num_batch + batch)
 
-                # # print an overview of training every 100 steps
-                # if batch % 100 == 0:
-                #     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
-
-                #     # check embedding norm
-                #     entity, relation = sess.run([embedding_entity, embedding_relation], feed_dict=feed_dict_train)
-                #
-                #     print('entity norm:')
-                #     print(np.linalg.norm(entity, ord=2, axis=1))
-                #     print(np.linalg.norm(entity, ord=2, axis=0))
-                #     print('relation norm:')
-                #     print(np.linalg.norm(relation, ord=2, axis=1))
-                #     print(np.linalg.norm(relation, ord=2, axis=0))
-                #     print('entity embedding:')
-                #     print(entity)
-                #     print('relation embedding:')
-                #     print(relation)
-                #     print()
-
-                # print an overview, save a checkpoint and evaluate the model periodically
-                if (batch + 1) % 10 == 0 or (batch + 1) == args.num_batch:
+                # print an overview and save a checkpoint periodically
+                if (batch + 1) % 10 == 0 or (batch + 1) == num_batch:
                     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
-                    # # save a checkpoint
-                    # save_path = saver.save(
-                    #     sess=sess,
-                    #     save_path=checkpoint_path,
-                    #     global_step=batch
-                    # )
-                    # print('model save at: {}'.format(save_path))
-                    # evaluate the model
-                    # run_evaluation(sess,
-                    #                predict_head,
-                    #                predict_tail,
-                    #                model,
-                    #                dataset,
-                    #                id_triplets_predict_head,
-                    #                id_triplets_predict_tail)
+
+                    # TODO: save a check point
 
             end_train = time.time()
             print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}s'.format(
@@ -202,29 +145,15 @@ def run_training(args):
                 end_train - start_train
             ))
 
-            # evaluate the model
-            run_evaluation(sess,
-                           predict_head,
-                           predict_tail,
-                           model,
-                           dataset,
-                           id_triplets_predict_head,
-                           id_triplets_predict_tail)
-            # print('evaluating the current model...')
-            # start_eval = time.time()
-            # rank = 0
-            # for triplet_validate in random.sample(dataset.triplets_validate, model.validate_size):
-            #     feed_dict_eval = {
-            #         id_triplets_validate: dataset.next_batch_eval(triplet_validate)
-            #     }
-            #     # list of dissimilarity, the first element in the list is the dissimilarity of the valid triplet
-            #     dissimilarity = sess.run(eval_op, feed_dict=feed_dict_eval)
-            #     # sort the list, get the rank of dissimilarity[0], which is argmin()
-            #     rank += dissimilarity.argsort().argmin()
-            # mean_rank = rank // model.validate_size
-            # end_eval = time.time()
-            # print('mean rank: {:d}, time elapsed last evaluation: {:.3f}s'.format(mean_rank, end_eval - start_eval))
-            # print('back to training...')
+            if (epoch + 1) % 5 == 0:
+                # evaluate the model
+                run_evaluation(sess,
+                               predict_head,
+                               predict_tail,
+                               model,
+                               dataset,
+                               id_triplets_predict_head,
+                               id_triplets_predict_tail)
 
         end_total = time.time()
         print('total time elapsed: {:.3f}s'.format(end_total - start_total))
@@ -294,14 +223,14 @@ def main():
     parser.add_argument(
         '--learning_rate',
         type=float,
-        default=0.001,
+        default=0.01,
         help='initial learning rate'
     )
     parser.add_argument(
-        '--num_batch',
+        '--batch_size',
         type=int,
-        default=100,
-        help='number of batches every epoch, batch_size = num_triplets_train // num_batch'
+        default=4800,
+        help='mini batch size for SGD'
     )
     parser.add_argument(
         '--num_epoch',

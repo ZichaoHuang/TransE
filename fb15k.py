@@ -93,7 +93,6 @@ class DataSet:
         print('calculating hpt & tph for reducing negative false labels...')
         grouped_relation = triplets_train_df.groupby('relation', as_index=False)
         # calculate head_per_tail and tail_per_head after group by relation
-        # n_to_one dataframe, columns = ['relation', 'head', 'tail']
         n_to_one = grouped_relation.agg({
             'head': lambda heads: heads.count(),
             'tail': lambda tails: tails.nunique()
@@ -163,24 +162,5 @@ class DataSet:
         id_tails_corrupted = set(self.id_to_entity.keys())
         id_tails_corrupted.remove(triplet_evaluate[2])  # remove the golden tail
         batch_predict_tail.extend([(triplet_evaluate[0], triplet_evaluate[1], tail) for tail in id_tails_corrupted])
-
-        # # construct a eval batch, consisting with a valid triplet
-        # # and two lists of corrupted triplets constructed by
-        # # replacing heads and tails
-        # batch_eval = [triplet_evaluate]
-        #
-        # triplets_corrupted = []
-        #
-        # # replacing head
-        # id_heads_corrupted = set(self.id_to_entity.keys())
-        # id_heads_corrupted.remove(triplet_evaluate[0])  # remove the valid head
-        # triplets_corrupted.extend([(head, triplet_evaluate[1], triplet_evaluate[2]) for head in id_heads_corrupted])
-        #
-        # # replacing tail
-        # id_tails_corrupted = set(self.id_to_entity.keys())
-        # id_tails_corrupted.remove(triplet_evaluate[2])  # remove the valid tail
-        # triplets_corrupted.extend([(triplet_evaluate[0], triplet_evaluate[1], tail) for tail in id_tails_corrupted])
-        #
-        # batch_eval.extend(triplets_corrupted)
 
         return batch_predict_head, batch_predict_tail
