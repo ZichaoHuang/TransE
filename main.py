@@ -91,6 +91,8 @@ def run_training(args):
         init_op = tf.global_variables_initializer()
         # merge all the summaries
         merge_summary_op = tf.merge_all_summaries()
+        # saver op to save or restore all variables
+        saver = tf.train.Saver()
 
     # open a session and run the training graph
     session_config = tf.ConfigProto(log_device_placement=True)
@@ -132,11 +134,9 @@ def run_training(args):
                 # write tensorboard logs
                 summary_writer.add_summary(summary, global_step=epoch * num_batch + batch)
 
-                # print an overview and save a checkpoint periodically
+                # print an overview every 10 batches
                 if (batch + 1) % 10 == 0 or (batch + 1) == num_batch:
                     print('epoch {}, batch {}, loss: {}'.format(epoch, batch, loss_batch))
-
-                    # TODO: save a check point
 
             end_train = time.time()
             print('epoch {}, mean batch loss: {:.3f}, time elapsed last epoch: {:.3f}s'.format(
@@ -145,8 +145,12 @@ def run_training(args):
                 end_train - start_train
             ))
 
+            # save a checkpoint every epoch
+            save_path = saver.save(sess, args.save_dir + 'model.ckpt')
+            print('model save in file {}'.format(save_path))
+
+            # evaluate the model every 5 epochs
             if (epoch + 1) % 5 == 0:
-                # evaluate the model
                 run_evaluation(sess,
                                predict_head,
                                predict_tail,
@@ -263,12 +267,18 @@ def main():
         help='the size of evaluate triplets, max is 50000'
     )
 
-    # tensorboard args
+    # tensorflow args
     parser.add_argument(
         '--log_dir',
         type=str,
-        default='log/',
+        default='dataset/FB15k/log/',
         help='tensorflow log files directory, for tensorboard'
+    )
+    parser.add_argument(
+        '--save_dir',
+        type=str,
+        default='dataset/FB15k/ckpt/',
+        help='tensorflow checkpoint directory, for variable save and restore'
     )
 
     args = parser.parse_args()

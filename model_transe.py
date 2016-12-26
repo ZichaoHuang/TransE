@@ -38,9 +38,9 @@ class TransE:
         # add a scalar summary for the snapshot loss
         tf.scalar_summary(loss.op.name, loss)
 
-        optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
+        # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
         # optimizer = tf.train.AdagradOptimizer(self.learning_rate)
-        # optimizer = tf.train.AdamOptimizer()  # loss drop really fast by using this
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         train_op = optimizer.minimize(loss)
 
         return train_op
