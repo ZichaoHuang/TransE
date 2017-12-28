@@ -8,13 +8,12 @@ import multiprocessing as mp
 
 class TransE:
     def __init__(self, dataset, embedding_dim, margin_value, score_func,
-                 batch_size, eval_batch_size, learning_rate, n_generator, n_rank_calculator):
+                 batch_size, learning_rate, n_generator, n_rank_calculator):
         self.dataset = dataset
         self.embedding_dim = embedding_dim
         self.margin_value = margin_value
         self.score_func = score_func
         self.batch_size = batch_size
-        self.eval_batch_size = eval_batch_size
         self.learning_rate = learning_rate
         self.n_generator = n_generator
         self.n_rank_calculator = n_rank_calculator
@@ -54,6 +53,9 @@ class TransE:
         self.build_eval_graph()
 
     def build_graph(self):
+        with tf.name_scope('normalization'):
+            self.entity_embedding = tf.nn.l2_normalize(self.entity_embedding, dim=1)
+            self.relation_embedding = tf.nn.l2_normalize(self.relation_embedding, dim=1)
         with tf.name_scope('training'):
             distance_pos, distance_neg = self.infer(self.triple_pos, self.triple_neg)
             self.loss = self.calculate_loss(distance_pos, distance_neg, self.margin)
@@ -68,9 +70,6 @@ class TransE:
                                             self.head_prediction_filter, self.tail_prediction_filter)
 
     def infer(self, triple_pos, triple_neg):
-        with tf.name_scope('normalization'):
-            self.entity_embedding = tf.nn.l2_normalize(self.entity_embedding, dim=1)
-            self.relation_embedding = tf.nn.l2_normalize(self.relation_embedding, dim=1)
         with tf.name_scope('lookup'):
             head_pos = tf.nn.embedding_lookup(self.entity_embedding, triple_pos[:, 0])
             tail_pos = tf.nn.embedding_lookup(self.entity_embedding, triple_pos[:, 1])
@@ -156,20 +155,15 @@ class TransE:
             summary_writer.add_summary(summary, global_step=self.global_step.eval(session=session))
             epoch_loss += batch_loss
             n_used_triple += len(batch_pos)
-            print('[{:.3f}s] #triple: {}/{} triple_avg_loss: {:.3f}'.format(timeit.default_timer() - start,
+            print('[{:.3f}s] #triple: {}/{} triple_avg_loss: {:.6f}'.format(timeit.default_timer() - start,
                                                                             n_used_triple,
                                                                             self.dataset.n_training_triple,
                                                                             batch_loss / len(batch_pos)), end='\r')
         print()
-        print('mean loss: {:.3f}'.format(epoch_loss / self.dataset.n_training_triple))
+        print('epoch loss: {:.3f}'.format(epoch_loss))
         print('cost time: {:.3f}s'.format(timeit.default_timer() - start))
         print('-----Finish training-----')
-        print('-----Check norm-----')
-        entity_embedding = self.entity_embedding.eval(session=session)
-        relation_embedding = self.relation_embedding.eval(session=session)
-        entity_norm = np.linalg.norm(entity_embedding, ord=2, axis=1)
-        relation_norm = np.linalg.norm(relation_embedding, ord=2, axis=1)
-        print('entity norm: {} relation norm: {}'.format(entity_norm, relation_norm))
+        self.check_norm(session=session)
 
     def generate_training_batch(self, in_queue, out_queue):
         while True:
@@ -194,22 +188,22 @@ class TransE:
                 out_queue.put((batch_pos, batch_neg))
 
     def launch_evaluation(self, session):
-        raw_eval_batch_queue = mp.Queue()
+        eval_triple_queue = mp.Queue()
         eval_batch_queue = mp.Queue(10000)
         eval_batch_and_score_queue = mp.JoinableQueue()
         rank_result_queue = mp.Queue()
         for _ in range(self.n_generator):
-            mp.Process(target=self.generate_evaluation_batch, kwargs={'in_queue': raw_eval_batch_queue,
+            mp.Process(target=self.generate_evaluation_batch, kwargs={'in_queue': eval_triple_queue,
                                                                       'out_queue': eval_batch_queue}).start()
         print('-----Start evaluation-----')
         start = timeit.default_timer()
         n_eval_triple = 0
-        for raw_eval_batch in self.dataset.next_raw_eval_batch(self.eval_batch_size):
-            raw_eval_batch_queue.put(raw_eval_batch)
-            n_eval_triple += len(raw_eval_batch)
+        for eval_triple in self.dataset.test_triples:
+            eval_triple_queue.put(eval_triple)
+            n_eval_triple += 1
         print('#eval triple: {}'.format(n_eval_triple))
         for _ in range(self.n_generator):
-            raw_eval_batch_queue.put(None)
+            eval_triple_queue.put(None)
         print('-----Constructing evaluation batches-----')
         for _ in range(self.n_rank_calculator):
             mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_batch_and_score_queue,
@@ -284,32 +278,31 @@ class TransE:
 
     def generate_evaluation_batch(self, in_queue, out_queue):
         while True:
-            raw_eval_batch = in_queue.get()
-            if raw_eval_batch is None:
+            eval_triple = in_queue.get()
+            if eval_triple is None:
                 return
             else:
-                for head, tail, relation in raw_eval_batch:
-                    current_triple = (head, tail, relation)
-                    '''Raw'''
-                    head_prediction_batch_raw = [current_triple]
-                    head_neg_pool = set(self.dataset.entity_dict.values())
-                    head_neg_pool.remove(head)
-                    head_prediction_batch_raw.extend([(head_neg, tail, relation) for head_neg in head_neg_pool])
-                    tail_prediction_batch_raw = [current_triple]
-                    tail_neg_pool = set(self.dataset.entity_dict.values())
-                    tail_neg_pool.remove(tail)
-                    tail_prediction_batch_raw.extend([(head, tail_neg, relation) for tail_neg in tail_neg_pool])
-                    '''Filter'''
-                    head_prediction_batch_filter = [current_triple]
-                    for triple_neg in head_prediction_batch_raw:
-                        if triple_neg not in self.dataset.golden_triple_pool:
-                            head_prediction_batch_filter.append(triple_neg)
-                    tail_prediction_batch_filter = [current_triple]
-                    for triple_neg in tail_prediction_batch_raw:
-                        if triple_neg not in self.dataset.golden_triple_pool:
-                            tail_prediction_batch_filter.append(triple_neg)
-                    out_queue.put((head_prediction_batch_raw, tail_prediction_batch_raw,
-                                   head_prediction_batch_filter, tail_prediction_batch_filter))
+                head, tail, relation = eval_triple
+                '''Raw'''
+                head_prediction_batch_raw = [eval_triple]
+                head_neg_pool = set(self.dataset.entity_dict.values())
+                head_neg_pool.remove(head)
+                head_prediction_batch_raw.extend([(head_neg, tail, relation) for head_neg in head_neg_pool])
+                tail_prediction_batch_raw = [eval_triple]
+                tail_neg_pool = set(self.dataset.entity_dict.values())
+                tail_neg_pool.remove(tail)
+                tail_prediction_batch_raw.extend([(head, tail_neg, relation) for tail_neg in tail_neg_pool])
+                '''Filter'''
+                head_prediction_batch_filter = [eval_triple]
+                for triple_neg in head_prediction_batch_raw:
+                    if triple_neg not in self.dataset.golden_triple_pool:
+                        head_prediction_batch_filter.append(triple_neg)
+                tail_prediction_batch_filter = [eval_triple]
+                for triple_neg in tail_prediction_batch_raw:
+                    if triple_neg not in self.dataset.golden_triple_pool:
+                        tail_prediction_batch_filter.append(triple_neg)
+                out_queue.put((head_prediction_batch_raw, tail_prediction_batch_raw,
+                               head_prediction_batch_filter, tail_prediction_batch_filter))
 
     def calculate_rank(self, in_queue, out_queue):
         while True:
@@ -333,3 +326,11 @@ class TransE:
                 out_queue.put((head_rank_raw, head_hits10_raw, tail_rank_raw, tail_hits10_raw,
                                head_rank_filter, head_hits10_filter, tail_rank_filter, tail_hits10_filter))
                 in_queue.task_done()
+
+    def check_norm(self, session):
+        print('-----Check norm-----')
+        entity_embedding = self.entity_embedding.eval(session=session)
+        relation_embedding = self.relation_embedding.eval(session=session)
+        entity_norm = np.linalg.norm(entity_embedding, ord=2, axis=1)
+        relation_norm = np.linalg.norm(relation_embedding, ord=2, axis=1)
+        print('entity norm: {} relation norm: {}'.format(entity_norm, relation_norm))

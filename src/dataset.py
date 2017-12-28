@@ -56,6 +56,7 @@ class Dataset:
                                          [self.relation_dict[r] for r in validation_df[2]]))
         self.n_validation_triple = len(self.validation_triples)
         print('#validation triple: {}'.format(self.n_validation_triple))
+        print('-----Loading test triples------')
         test_df = pd.read_table(os.path.join(self.data_dir, test_file), header=None)
         self.test_triples = list(zip([self.entity_dict[h] for h in test_df[0]],
                                      [self.entity_dict[t] for t in test_df[1]],
@@ -69,11 +70,4 @@ class Dataset:
         while start < self.n_training_triple:
             end = min(start + batch_size, self.n_training_triple)
             yield [self.training_triples[i] for i in rand_idx[start:end]]
-            start = end
-
-    def next_raw_eval_batch(self, eval_batch_size):
-        start = 0
-        while start < self.n_test_triple:
-            end = min(start + eval_batch_size, self.n_test_triple)
-            yield self.test_triples[start:end]
             start = end
