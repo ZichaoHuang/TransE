@@ -28,11 +28,9 @@ class TransE:
         self.merge = None
 
         '''ops for evaluation'''
-        self.head_prediction_raw = tf.placeholder(dtype=tf.int32, shape=[None, 3])
-        self.tail_prediction_raw = tf.placeholder(dtype=tf.int32, shape=[None, 3])
-        self.head_prediction_filter = tf.placeholder(dtype=tf.int32, shape=[None, 3])
-        self.tail_prediction_filter = tf.placeholder(dtype=tf.int32, shape=[None, 3])
-        self.score_eval = None
+        self.eval_triple = tf.placeholder(dtype=tf.int32, shape=[3])
+        self.idx_head_prediction = None
+        self.idx_tail_prediction = None
 
         bound = 6 / math.sqrt(self.embedding_dim)
 
@@ -66,8 +64,7 @@ class TransE:
 
     def build_eval_graph(self):
         with tf.name_scope('evaluation'):
-            self.score_eval = self.evaluate(self.head_prediction_raw, self.tail_prediction_raw,
-                                            self.head_prediction_filter, self.tail_prediction_filter)
+            self.idx_head_prediction, self.idx_tail_prediction = self.evaluate(self.eval_triple)
 
     def infer(self, triple_pos, triple_neg):
         with tf.name_scope('lookup'):
@@ -95,39 +92,22 @@ class TransE:
 
         return loss
 
-    def evaluate(self, head_prediction_raw, tail_prediction_raw, head_prediction_filter, tail_prediction_filter):
+    def evaluate(self, eval_triple):
         with tf.name_scope('lookup'):
-            '''Raw'''
-            head_prediction_raw_h = tf.nn.embedding_lookup(self.entity_embedding, head_prediction_raw[:, 0])
-            head_prediction_raw_t = tf.nn.embedding_lookup(self.entity_embedding, head_prediction_raw[:, 1])
-            head_prediction_raw_r = tf.nn.embedding_lookup(self.relation_embedding, head_prediction_raw[:, 2])
-            tail_prediction_raw_h = tf.nn.embedding_lookup(self.entity_embedding, tail_prediction_raw[:, 0])
-            tail_prediction_raw_t = tf.nn.embedding_lookup(self.entity_embedding, tail_prediction_raw[:, 1])
-            tail_prediction_raw_r = tf.nn.embedding_lookup(self.relation_embedding, tail_prediction_raw[:, 2])
-            '''Filter'''
-            head_prediction_filter_h = tf.nn.embedding_lookup(self.entity_embedding, head_prediction_filter[:, 0])
-            head_prediction_filter_t = tf.nn.embedding_lookup(self.entity_embedding, head_prediction_filter[:, 1])
-            head_prediction_filter_r = tf.nn.embedding_lookup(self.relation_embedding, head_prediction_filter[:, 2])
-            tail_prediction_filter_h = tf.nn.embedding_lookup(self.entity_embedding, tail_prediction_filter[:, 0])
-            tail_prediction_filter_t = tf.nn.embedding_lookup(self.entity_embedding, tail_prediction_filter[:, 1])
-            tail_prediction_filter_r = tf.nn.embedding_lookup(self.relation_embedding, tail_prediction_filter[:, 2])
+            head = tf.nn.embedding_lookup(self.entity_embedding, eval_triple[0])
+            tail = tf.nn.embedding_lookup(self.entity_embedding, eval_triple[1])
+            relation = tf.nn.embedding_lookup(self.relation_embedding, eval_triple[2])
         with tf.name_scope('link'):
-            distance_head_prediction_raw = head_prediction_raw_h + head_prediction_raw_r - head_prediction_raw_t
-            distance_tail_prediction_raw = tail_prediction_raw_h + tail_prediction_raw_r - tail_prediction_raw_t
-            distance_head_prediction_filter = head_prediction_filter_h + head_prediction_filter_r - head_prediction_filter_t
-            distance_tail_prediction_filter = tail_prediction_filter_h + tail_prediction_filter_r - tail_prediction_filter_t
-        with tf.name_scope('score'):
+            distance_head_prediction = self.entity_embedding + relation - tail
+            distance_tail_prediction = head + relation - self.entity_embedding
+        with tf.name_scope('rank'):
             if self.score_func == 'L1':  # L1 score
-                score_head_prediction_raw = tf.reduce_sum(tf.abs(distance_head_prediction_raw), axis=1)
-                score_tail_prediction_raw = tf.reduce_sum(tf.abs(distance_tail_prediction_raw), axis=1)
-                score_head_prediction_filter = tf.reduce_sum(tf.abs(distance_head_prediction_filter), axis=1)
-                score_tail_prediction_filter = tf.reduce_sum(tf.abs(distance_tail_prediction_filter), axis=1)
+                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_head_prediction), axis=1), k=self.dataset.n_entity)
+                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_tail_prediction), axis=1), k=self.dataset.n_entity)
             else:  # L2 score
-                score_head_prediction_raw = tf.sqrt(tf.reduce_sum(tf.square(distance_head_prediction_raw), axis=1))
-                score_tail_prediction_raw = tf.sqrt(tf.reduce_sum(tf.square(distance_tail_prediction_raw), axis=1))
-                score_head_prediction_filter = tf.sqrt(tf.reduce_sum(tf.square(distance_head_prediction_filter), axis=1))
-                score_tail_prediction_filter = tf.sqrt(tf.reduce_sum(tf.square(distance_tail_prediction_filter), axis=1))
-        return score_head_prediction_raw, score_tail_prediction_raw, score_head_prediction_filter, score_tail_prediction_filter
+                _, idx_head_prediction = tf.nn.top_k(tf.sqrt(tf.reduce_sum(tf.square(distance_head_prediction), axis=1)), k=self.dataset.n_entity)
+                _, idx_tail_prediction = tf.nn.top_k(tf.sqrt(tf.reduce_sum(tf.square(distance_tail_prediction), axis=1)), k=self.dataset.n_entity)
+        return idx_head_prediction, idx_tail_prediction
 
     def launch_training(self, session, summary_writer):
         raw_batch_queue = mp.Queue()
@@ -188,72 +168,59 @@ class TransE:
                 out_queue.put((batch_pos, batch_neg))
 
     def launch_evaluation(self, session):
-        eval_triple_queue = mp.Queue()
-        eval_batch_queue = mp.Queue(10000)
-        eval_batch_and_score_queue = mp.JoinableQueue()
+        eval_result_queue = mp.JoinableQueue()
         rank_result_queue = mp.Queue()
-        for _ in range(self.n_generator):
-            mp.Process(target=self.generate_evaluation_batch, kwargs={'in_queue': eval_triple_queue,
-                                                                      'out_queue': eval_batch_queue}).start()
         print('-----Start evaluation-----')
         start = timeit.default_timer()
-        n_eval_triple = 0
-        for eval_triple in self.dataset.test_triples:
-            eval_triple_queue.put(eval_triple)
-            n_eval_triple += 1
-        print('#eval triple: {}'.format(n_eval_triple))
-        for _ in range(self.n_generator):
-            eval_triple_queue.put(None)
-        print('-----Constructing evaluation batches-----')
         for _ in range(self.n_rank_calculator):
-            mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_batch_and_score_queue,
+            mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_result_queue,
                                                            'out_queue': rank_result_queue}).start()
-        for i in range(n_eval_triple):
-            head_prediction_batch_raw, tail_prediction_batch_raw, \
-                head_prediction_batch_filter, tail_prediction_batch_filter = eval_batch_queue.get()
-            score_eval = session.run(fetches=self.score_eval,
-                                     feed_dict={self.head_prediction_raw: head_prediction_batch_raw,
-                                                self.tail_prediction_raw: tail_prediction_batch_raw,
-                                                self.head_prediction_filter: head_prediction_batch_filter,
-                                                self.tail_prediction_filter: tail_prediction_batch_filter})
-            head_prediction_score_raw, tail_prediction_score_raw, \
-                head_prediction_score_filter, tail_prediction_score_filter = score_eval
-            eval_batch_and_score_queue.put((head_prediction_score_raw, tail_prediction_score_raw,
-                                            head_prediction_score_filter, tail_prediction_score_filter))
+        n_used_eval_triple = 0
+        for eval_triple in self.dataset.test_triples:
+            idx_head_prediction, idx_tail_prediction = session.run(fetches=[self.idx_head_prediction,
+                                                                            self.idx_tail_prediction],
+                                                                   feed_dict={self.eval_triple: eval_triple})
+            eval_result_queue.put((eval_triple, idx_head_prediction, idx_tail_prediction))
+            n_used_eval_triple += 1
             print('[{:.3f}s] #evaluation triple: {}/{}'.format(timeit.default_timer() - start,
-                                                               i + 1,
-                                                               n_eval_triple), end='\r')
+                                                               n_used_eval_triple,
+                                                               self.dataset.n_test_triple), end='\r')
         print()
         for _ in range(self.n_rank_calculator):
-            eval_batch_and_score_queue.put(None)
+            eval_result_queue.put(None)
         print('-----Joining all rank calculator-----')
-        eval_batch_and_score_queue.join()
+        eval_result_queue.join()
         print('-----All rank calculation accomplished-----')
         print('-----Obtaining evaluation results-----')
-        head_rank_raw_sum = 0
-        head_hits10_raw_sum = 0
-        tail_rank_raw_sum = 0
-        tail_hits10_raw_sum = 0
-        head_rank_filter_sum = 0
-        head_hits10_filter_sum = 0
-        tail_rank_filter_sum = 0
-        tail_hits10_filter_sum = 0
-        for _ in range(n_eval_triple):
-            head_rank_raw, head_hits10_raw, tail_rank_raw, tail_hits10_raw, \
-                head_rank_filter, head_hits10_filter, tail_rank_filter, tail_hits10_filter = rank_result_queue.get()
-            head_rank_raw_sum += head_rank_raw
-            head_hits10_raw_sum += head_hits10_raw
-            tail_rank_raw_sum += tail_rank_raw
-            tail_hits10_raw_sum += tail_hits10_raw
-            head_rank_filter_sum += head_rank_filter
-            tail_rank_filter_sum += tail_rank_filter
-            head_hits10_filter_sum += head_hits10_filter
-            tail_hits10_filter_sum += tail_hits10_filter
+        '''Raw'''
+        head_meanrank_raw = 0
+        head_hits10_raw = 0
+        tail_meanrank_raw = 0
+        tail_hits10_raw = 0
+        '''Filter'''
+        head_meanrank_filter = 0
+        head_hits10_filter = 0
+        tail_meanrank_filter = 0
+        tail_hits10_filter = 0
+        for _ in range(n_used_eval_triple):
+            head_rank_raw, tail_rank_raw, head_rank_filter, tail_rank_filter = rank_result_queue.get()
+            head_meanrank_raw += head_rank_raw
+            if head_rank_raw < 10:
+                head_hits10_raw += 1
+            tail_meanrank_raw += tail_rank_raw
+            if tail_rank_raw < 10:
+                tail_hits10_raw += 1
+            head_meanrank_filter += head_rank_filter
+            if head_rank_filter < 10:
+                head_hits10_filter += 1
+            tail_meanrank_filter += tail_rank_filter
+            if tail_rank_filter < 10:
+                tail_hits10_filter += 1
         print('-----Raw-----')
-        head_meanrank_raw = head_rank_raw_sum / n_eval_triple
-        head_hits10_raw = head_hits10_raw_sum / n_eval_triple
-        tail_meanrank_raw = tail_rank_raw_sum / n_eval_triple
-        tail_hits10_raw = tail_hits10_raw_sum / n_eval_triple
+        head_meanrank_raw /= n_used_eval_triple
+        head_hits10_raw /= n_used_eval_triple
+        tail_meanrank_raw /= n_used_eval_triple
+        tail_hits10_raw /= n_used_eval_triple
         print('-----Head prediction-----')
         print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_raw, head_hits10_raw))
         print('-----Tail prediction-----')
@@ -262,10 +229,10 @@ class TransE:
         print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format((head_meanrank_raw + tail_meanrank_raw) / 2,
                                                          (head_hits10_raw + tail_hits10_raw) / 2))
         print('-----Filter-----')
-        head_meanrank_filter = head_rank_filter_sum / n_eval_triple
-        head_hits10_filter = head_hits10_filter_sum / n_eval_triple
-        tail_meanrank_filter = tail_rank_filter_sum / n_eval_triple
-        tail_hits10_filter = tail_hits10_filter_sum / n_eval_triple
+        head_meanrank_filter /= n_used_eval_triple
+        head_hits10_filter /= n_used_eval_triple
+        tail_meanrank_filter /= n_used_eval_triple
+        tail_hits10_filter /= n_used_eval_triple
         print('-----Head prediction-----')
         print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_filter, head_hits10_filter))
         print('-----Tail prediction-----')
@@ -276,55 +243,38 @@ class TransE:
         print('cost time: {:.3f}s'.format(timeit.default_timer() - start))
         print('-----Finish evaluation-----')
 
-    def generate_evaluation_batch(self, in_queue, out_queue):
-        while True:
-            eval_triple = in_queue.get()
-            if eval_triple is None:
-                return
-            else:
-                head, tail, relation = eval_triple
-                '''Raw'''
-                head_prediction_batch_raw = [eval_triple]
-                head_neg_pool = set(self.dataset.entity_dict.values())
-                head_neg_pool.remove(head)
-                head_prediction_batch_raw.extend([(head_neg, tail, relation) for head_neg in head_neg_pool])
-                tail_prediction_batch_raw = [eval_triple]
-                tail_neg_pool = set(self.dataset.entity_dict.values())
-                tail_neg_pool.remove(tail)
-                tail_prediction_batch_raw.extend([(head, tail_neg, relation) for tail_neg in tail_neg_pool])
-                '''Filter'''
-                head_prediction_batch_filter = [eval_triple]
-                for triple_neg in head_prediction_batch_raw:
-                    if triple_neg not in self.dataset.golden_triple_pool:
-                        head_prediction_batch_filter.append(triple_neg)
-                tail_prediction_batch_filter = [eval_triple]
-                for triple_neg in tail_prediction_batch_raw:
-                    if triple_neg not in self.dataset.golden_triple_pool:
-                        tail_prediction_batch_filter.append(triple_neg)
-                out_queue.put((head_prediction_batch_raw, tail_prediction_batch_raw,
-                               head_prediction_batch_filter, tail_prediction_batch_filter))
-
     def calculate_rank(self, in_queue, out_queue):
         while True:
-            eval_batch_and_score = in_queue.get()
-            if eval_batch_and_score is None:
+            idx_predictions = in_queue.get()
+            if idx_predictions is None:
                 in_queue.task_done()
                 return
             else:
-                head_prediction_score_raw, tail_prediction_score_raw, \
-                    head_prediction_score_filter, tail_prediction_score_filter = eval_batch_and_score
-                '''Raw'''
-                head_rank_raw = np.argsort(head_prediction_score_raw).argmin()
-                head_hits10_raw = 1 if head_rank_raw < 10 else 0
-                tail_rank_raw = np.argsort(tail_prediction_score_raw).argmin()
-                tail_hits10_raw = 1 if tail_rank_raw < 10 else 0
-                '''Filter'''
-                head_rank_filter = np.argsort(head_prediction_score_filter).argmin()
-                head_hits10_filter = 1 if head_rank_filter < 10 else 0
-                tail_rank_filter = np.argsort(tail_prediction_score_filter).argmin()
-                tail_hits10_filter = 1 if tail_rank_filter < 10 else 0
-                out_queue.put((head_rank_raw, head_hits10_raw, tail_rank_raw, tail_hits10_raw,
-                               head_rank_filter, head_hits10_filter, tail_rank_filter, tail_hits10_filter))
+                eval_triple, idx_head_prediction, idx_tail_prediction = idx_predictions
+                head, tail, relation = eval_triple
+                head_rank_raw = 0
+                tail_rank_raw = 0
+                head_rank_filter = 0
+                tail_rank_filter = 0
+                for candidate in idx_head_prediction[::-1]:
+                    if candidate == head:
+                        break
+                    else:
+                        head_rank_raw += 1
+                        if (candidate, tail, relation) in self.dataset.golden_triple_pool:
+                            continue
+                        else:
+                            head_rank_filter += 1
+                for candidate in idx_tail_prediction[::-1]:
+                    if candidate == tail:
+                        break
+                    else:
+                        tail_rank_raw += 1
+                        if (head, candidate, relation) in self.dataset.golden_triple_pool:
+                            continue
+                        else:
+                            tail_rank_filter += 1
+                out_queue.put((head_rank_raw, tail_rank_raw, head_rank_filter, tail_rank_filter))
                 in_queue.task_done()
 
     def check_norm(self, session):

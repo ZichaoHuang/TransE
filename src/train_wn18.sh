@@ -8,5 +8,5 @@ python main.py \
 --learning_rate 0.01 \
 --n_generator 24 \
 --n_rank_calculator 24 \
---eval_freq 50 \
+--eval_freq 100 \
 --max_epoch 5000

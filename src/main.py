@@ -23,8 +23,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    fb15k = Dataset(data_dir=args.data_dir)
-    kge_model = TransE(dataset=fb15k, embedding_dim=args.embedding_dim, margin_value=args.margin_value,
+    kg = Dataset(data_dir=args.data_dir)
+    kge_model = TransE(dataset=kg, embedding_dim=args.embedding_dim, margin_value=args.margin_value,
                        score_func=args.score_func, batch_size=args.batch_size, learning_rate=args.learning_rate,
                        n_generator=args.n_generator, n_rank_calculator=args.n_rank_calculator)
     gpu_config = tf.GPUOptions(allow_growth=True)
@@ -35,7 +35,6 @@ def main():
         print('-----Initialization accomplished-----')
         kge_model.check_norm(session=sess)
         summary_writer = tf.summary.FileWriter(logdir=args.summary_dir, graph=sess.graph)
-        # kge_model.launch_evaluation(session=sess)
         for epoch in range(args.max_epoch):
             print('=' * 30 + '[EPOCH {}]'.format(epoch) + '=' * 30)
             kge_model.launch_training(session=sess, summary_writer=summary_writer)
