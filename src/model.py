@@ -86,8 +86,8 @@ class TransE:
                 score_pos = tf.reduce_sum(tf.abs(distance_pos), axis=1)
                 score_neg = tf.reduce_sum(tf.abs(distance_neg), axis=1)
             else:  # L2 score
-                score_pos = tf.sqrt(tf.reduce_sum(tf.square(distance_pos), axis=1))
-                score_neg = tf.sqrt(tf.reduce_sum(tf.square(distance_neg), axis=1))
+                score_pos = tf.reduce_sum(tf.square(distance_pos), axis=1)
+                score_neg = tf.reduce_sum(tf.square(distance_neg), axis=1)
             loss = tf.reduce_sum(tf.nn.relu(margin + score_pos - score_neg), name='max_margin_loss')
 
         return loss
@@ -105,8 +105,8 @@ class TransE:
                 _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_head_prediction), axis=1), k=self.dataset.n_entity)
                 _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_tail_prediction), axis=1), k=self.dataset.n_entity)
             else:  # L2 score
-                _, idx_head_prediction = tf.nn.top_k(tf.sqrt(tf.reduce_sum(tf.square(distance_head_prediction), axis=1)), k=self.dataset.n_entity)
-                _, idx_tail_prediction = tf.nn.top_k(tf.sqrt(tf.reduce_sum(tf.square(distance_tail_prediction), axis=1)), k=self.dataset.n_entity)
+                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_head_prediction), axis=1), k=self.dataset.n_entity)
+                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_tail_prediction), axis=1), k=self.dataset.n_entity)
         return idx_head_prediction, idx_tail_prediction
 
     def launch_training(self, session, summary_writer):
