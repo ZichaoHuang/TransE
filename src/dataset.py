@@ -52,8 +52,8 @@ class Dataset:
         print('-----Loading validation triples-----')
         validation_df = pd.read_table(os.path.join(self.data_dir, validation_file), header=None)
         self.validation_triples = list(zip([self.entity_dict[h] for h in validation_df[0]],
-                                         [self.entity_dict[t] for t in validation_df[1]],
-                                         [self.relation_dict[r] for r in validation_df[2]]))
+                                           [self.entity_dict[t] for t in validation_df[1]],
+                                           [self.relation_dict[r] for r in validation_df[2]]))
         self.n_validation_triple = len(self.validation_triples)
         print('#validation triple: {}'.format(self.n_validation_triple))
         print('-----Loading test triples------')
