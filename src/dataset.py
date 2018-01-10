@@ -1,9 +1,10 @@
 import os
 import pandas as pd
 import numpy as np
+import random
 
 
-class Dataset:
+class KnowledgeGraph:
     def __init__(self, data_dir):
         self.data_dir = data_dir
 
@@ -71,3 +72,25 @@ class Dataset:
             end = min(start + batch_size, self.n_training_triple)
             yield [self.training_triples[i] for i in rand_idx[start:end]]
             start = end
+
+    def generate_training_batch(self, in_queue, out_queue):
+        while True:
+            raw_batch = in_queue.get()
+            if raw_batch is None:
+                return
+            else:
+                batch_pos = raw_batch
+                batch_neg = []
+                corrupt_head_prob = np.random.binomial(1, 0.5)
+                for head, tail, relation in batch_pos:
+                    head_neg = head
+                    tail_neg = tail
+                    while True:
+                        if corrupt_head_prob:
+                            head_neg = random.sample(list(self.entity_dict.values()), 1)[0]
+                        else:
+                            tail_neg = random.sample(list(self.entity_dict.values()), 1)[0]
+                        if (head_neg, tail_neg, relation) not in self.golden_triple_pool:
+                            break
+                    batch_neg.append((head_neg, tail_neg, relation))
+                out_queue.put((batch_pos, batch_neg))

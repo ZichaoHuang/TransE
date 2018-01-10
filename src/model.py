@@ -1,15 +1,14 @@
 import math
 import timeit
-import random
 import numpy as np
 import tensorflow as tf
 import multiprocessing as mp
 
 
 class TransE:
-    def __init__(self, dataset, embedding_dim, margin_value, score_func,
+    def __init__(self, kg, embedding_dim, margin_value, score_func,
                  batch_size, learning_rate, n_generator, n_rank_calculator):
-        self.dataset = dataset
+        self.kg = kg
         self.embedding_dim = embedding_dim
         self.margin_value = margin_value
         self.score_func = score_func
@@ -37,12 +36,12 @@ class TransE:
         '''embeddings'''
         with tf.variable_scope('embedding'):
             self.entity_embedding = tf.get_variable(name='entity',
-                                                    shape=[dataset.n_entity, self.embedding_dim],
+                                                    shape=[kg.n_entity, self.embedding_dim],
                                                     initializer=tf.random_uniform_initializer(minval=-bound,
                                                                                               maxval=bound))
             tf.summary.histogram(name=self.entity_embedding.op.name, values=self.entity_embedding)
             self.relation_embedding = tf.get_variable(name='relation',
-                                                      shape=[dataset.n_relation, self.embedding_dim],
+                                                      shape=[kg.n_relation, self.embedding_dim],
                                                       initializer=tf.random_uniform_initializer(minval=-bound,
                                                                                                 maxval=bound))
             tf.summary.histogram(name=self.relation_embedding.op.name, values=self.relation_embedding)
@@ -102,23 +101,27 @@ class TransE:
             distance_tail_prediction = head + relation - self.entity_embedding
         with tf.name_scope('rank'):
             if self.score_func == 'L1':  # L1 score
-                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_head_prediction), axis=1), k=self.dataset.n_entity)
-                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_tail_prediction), axis=1), k=self.dataset.n_entity)
+                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_head_prediction), axis=1),
+                                                     k=self.kg.n_entity)
+                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.abs(distance_tail_prediction), axis=1),
+                                                     k=self.kg.n_entity)
             else:  # L2 score
-                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_head_prediction), axis=1), k=self.dataset.n_entity)
-                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_tail_prediction), axis=1), k=self.dataset.n_entity)
+                _, idx_head_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_head_prediction), axis=1),
+                                                     k=self.kg.n_entity)
+                _, idx_tail_prediction = tf.nn.top_k(tf.reduce_sum(tf.square(distance_tail_prediction), axis=1),
+                                                     k=self.kg.n_entity)
         return idx_head_prediction, idx_tail_prediction
 
     def launch_training(self, session, summary_writer):
         raw_batch_queue = mp.Queue()
         training_batch_queue = mp.Queue()
         for _ in range(self.n_generator):
-            mp.Process(target=self.generate_training_batch, kwargs={'in_queue': raw_batch_queue,
-                                                                    'out_queue': training_batch_queue}).start()
+            mp.Process(target=self.kg.generate_training_batch, kwargs={'in_queue': raw_batch_queue,
+                                                                       'out_queue': training_batch_queue}).start()
         print('-----Start training-----')
         start = timeit.default_timer()
         n_batch = 0
-        for raw_batch in self.dataset.next_raw_batch(self.batch_size):
+        for raw_batch in self.kg.next_raw_batch(self.batch_size):
             raw_batch_queue.put(raw_batch)
             n_batch += 1
         for _ in range(self.n_generator):
@@ -137,35 +140,13 @@ class TransE:
             n_used_triple += len(batch_pos)
             print('[{:.3f}s] #triple: {}/{} triple_avg_loss: {:.6f}'.format(timeit.default_timer() - start,
                                                                             n_used_triple,
-                                                                            self.dataset.n_training_triple,
+                                                                            self.kg.n_training_triple,
                                                                             batch_loss / len(batch_pos)), end='\r')
         print()
         print('epoch loss: {:.3f}'.format(epoch_loss))
         print('cost time: {:.3f}s'.format(timeit.default_timer() - start))
         print('-----Finish training-----')
         self.check_norm(session=session)
-
-    def generate_training_batch(self, in_queue, out_queue):
-        while True:
-            raw_batch = in_queue.get()
-            if raw_batch is None:
-                return
-            else:
-                batch_pos = raw_batch
-                batch_neg = []
-                corrupt_head_prob = np.random.binomial(1, 0.5)
-                for head, tail, relation in batch_pos:
-                    head_neg = head
-                    tail_neg = tail
-                    while True:
-                        if corrupt_head_prob:
-                            head_neg = random.sample(list(self.dataset.entity_dict.values()), 1)[0]
-                        else:
-                            tail_neg = random.sample(list(self.dataset.entity_dict.values()), 1)[0]
-                        if (head_neg, tail_neg, relation) not in self.dataset.golden_triple_pool:
-                            break
-                    batch_neg.append((head_neg, tail_neg, relation))
-                out_queue.put((batch_pos, batch_neg))
 
     def launch_evaluation(self, session):
         eval_result_queue = mp.JoinableQueue()
@@ -176,7 +157,7 @@ class TransE:
             mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_result_queue,
                                                            'out_queue': rank_result_queue}).start()
         n_used_eval_triple = 0
-        for eval_triple in self.dataset.test_triples:
+        for eval_triple in self.kg.test_triples:
             idx_head_prediction, idx_tail_prediction = session.run(fetches=[self.idx_head_prediction,
                                                                             self.idx_tail_prediction],
                                                                    feed_dict={self.eval_triple: eval_triple})
@@ -184,7 +165,7 @@ class TransE:
             n_used_eval_triple += 1
             print('[{:.3f}s] #evaluation triple: {}/{}'.format(timeit.default_timer() - start,
                                                                n_used_eval_triple,
-                                                               self.dataset.n_test_triple), end='\r')
+                                                               self.kg.n_test_triple), end='\r')
         print()
         for _ in range(self.n_rank_calculator):
             eval_result_queue.put(None)
@@ -261,7 +242,7 @@ class TransE:
                         break
                     else:
                         head_rank_raw += 1
-                        if (candidate, tail, relation) in self.dataset.golden_triple_pool:
+                        if (candidate, tail, relation) in self.kg.golden_triple_pool:
                             continue
                         else:
                             head_rank_filter += 1
@@ -270,7 +251,7 @@ class TransE:
                         break
                     else:
                         tail_rank_raw += 1
-                        if (head, candidate, relation) in self.dataset.golden_triple_pool:
+                        if (head, candidate, relation) in self.kg.golden_triple_pool:
                             continue
                         else:
                             tail_rank_filter += 1

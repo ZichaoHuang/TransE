@@ -1,4 +1,4 @@
-from dataset import Dataset
+from dataset import KnowledgeGraph
 from model import TransE
 
 import tensorflow as tf
@@ -23,8 +23,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    kg = Dataset(data_dir=args.data_dir)
-    kge_model = TransE(dataset=kg, embedding_dim=args.embedding_dim, margin_value=args.margin_value,
+    kg = KnowledgeGraph(data_dir=args.data_dir)
+    kge_model = TransE(kg=kg, embedding_dim=args.embedding_dim, margin_value=args.margin_value,
                        score_func=args.score_func, batch_size=args.batch_size, learning_rate=args.learning_rate,
                        n_generator=args.n_generator, n_rank_calculator=args.n_rank_calculator)
     gpu_config = tf.GPUOptions(allow_growth=True)
