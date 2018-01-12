@@ -19,10 +19,8 @@ def main():
     parser.add_argument('--summary_dir', type=str, default='../summary/')
     parser.add_argument('--max_epoch', type=int, default=500)
     parser.add_argument('--eval_freq', type=int, default=10)
-
     args = parser.parse_args()
     print(args)
-
     kg = KnowledgeGraph(data_dir=args.data_dir)
     kge_model = TransE(kg=kg, embedding_dim=args.embedding_dim, margin_value=args.margin_value,
                        score_func=args.score_func, batch_size=args.batch_size, learning_rate=args.learning_rate,

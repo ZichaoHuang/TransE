@@ -7,25 +7,24 @@ import random
 class KnowledgeGraph:
     def __init__(self, data_dir):
         self.data_dir = data_dir
-
         self.entity_dict = {}
         self.relation_dict = {}
         self.n_entity = 0
         self.n_relation = 0
-
         self.training_triples = []  # list of triples in the form of (h, t, r)
         self.validation_triples = []
         self.test_triples = []
         self.n_training_triple = 0
         self.n_validation_triple = 0
         self.n_test_triple = 0
-
-        self.load_dict()
+        '''load dicts and triples'''
+        self.load_dicts()
         self.load_triples()
-
+        '''construct pools after loading'''
+        self.training_triple_pool = set(self.training_triples)
         self.golden_triple_pool = set(self.training_triples) | set(self.validation_triples) | set(self.test_triples)
 
-    def load_dict(self):
+    def load_dicts(self):
         entity_dict_file = 'entity2id.txt'
         relation_dict_file = 'relation2id.txt'
         print('-----Loading entity dict-----')
@@ -90,7 +89,7 @@ class KnowledgeGraph:
                             head_neg = random.sample(list(self.entity_dict.values()), 1)[0]
                         else:
                             tail_neg = random.sample(list(self.entity_dict.values()), 1)[0]
-                        if (head_neg, tail_neg, relation) not in self.golden_triple_pool:
+                        if (head_neg, tail_neg, relation) not in self.training_triple_pool:
                             break
                     batch_neg.append((head_neg, tail_neg, relation))
                 out_queue.put((batch_pos, batch_neg))

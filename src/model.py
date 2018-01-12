@@ -3,10 +3,12 @@ import timeit
 import numpy as np
 import tensorflow as tf
 import multiprocessing as mp
+from dataset import KnowledgeGraph
 
 
 class TransE:
-    def __init__(self, kg, embedding_dim, margin_value, score_func,
+    def __init__(self, kg: KnowledgeGraph,
+                 embedding_dim, margin_value, score_func,
                  batch_size, learning_rate, n_generator, n_rank_calculator):
         self.kg = kg
         self.embedding_dim = embedding_dim
@@ -16,7 +18,6 @@ class TransE:
         self.learning_rate = learning_rate
         self.n_generator = n_generator
         self.n_rank_calculator = n_rank_calculator
-
         '''ops for training'''
         self.triple_pos = tf.placeholder(dtype=tf.int32, shape=[None, 3])
         self.triple_neg = tf.placeholder(dtype=tf.int32, shape=[None, 3])
@@ -25,15 +26,12 @@ class TransE:
         self.loss = None
         self.global_step = tf.Variable(initial_value=0, trainable=False, name='global_step')
         self.merge = None
-
         '''ops for evaluation'''
         self.eval_triple = tf.placeholder(dtype=tf.int32, shape=[3])
         self.idx_head_prediction = None
         self.idx_tail_prediction = None
-
-        bound = 6 / math.sqrt(self.embedding_dim)
-
         '''embeddings'''
+        bound = 6 / math.sqrt(self.embedding_dim)
         with tf.variable_scope('embedding'):
             self.entity_embedding = tf.get_variable(name='entity',
                                                     shape=[kg.n_entity, self.embedding_dim],
@@ -45,7 +43,6 @@ class TransE:
                                                       initializer=tf.random_uniform_initializer(minval=-bound,
                                                                                                 maxval=bound))
             tf.summary.histogram(name=self.relation_embedding.op.name, values=self.relation_embedding)
-
         self.build_graph()
         self.build_eval_graph()
 
@@ -76,7 +73,6 @@ class TransE:
         with tf.name_scope('link'):
             distance_pos = head_pos + relation_pos - tail_pos
             distance_neg = head_neg + relation_neg - tail_neg
-
         return distance_pos, distance_neg
 
     def calculate_loss(self, distance_pos, distance_neg, margin):
@@ -88,7 +84,6 @@ class TransE:
                 score_pos = tf.reduce_sum(tf.square(distance_pos), axis=1)
                 score_neg = tf.reduce_sum(tf.square(distance_neg), axis=1)
             loss = tf.reduce_sum(tf.nn.relu(margin + score_pos - score_neg), name='max_margin_loss')
-
         return loss
 
     def evaluate(self, eval_triple):
