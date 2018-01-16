@@ -4,7 +4,7 @@ python main.py \
 --data_dir ../data/WN18/ \
 --embedding_dim 50 \
 --margin_value 4 \
---batch_size 1500 \
+--batch_size 3000 \
 --learning_rate 0.01 \
 --n_generator 24 \
 --n_rank_calculator 24 \

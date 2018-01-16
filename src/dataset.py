@@ -8,6 +8,7 @@ class KnowledgeGraph:
     def __init__(self, data_dir):
         self.data_dir = data_dir
         self.entity_dict = {}
+        self.entities = []
         self.relation_dict = {}
         self.n_entity = 0
         self.n_relation = 0
@@ -31,6 +32,7 @@ class KnowledgeGraph:
         entity_df = pd.read_table(os.path.join(self.data_dir, entity_dict_file), header=None)
         self.entity_dict = dict(zip(entity_df[0], entity_df[1]))
         self.n_entity = len(self.entity_dict)
+        self.entities = list(self.entity_dict.values())
         print('#entity: {}'.format(self.n_entity))
         print('-----Loading relation dict-----')
         relation_df = pd.read_table(os.path.join(self.data_dir, relation_dict_file), header=None)
@@ -86,9 +88,9 @@ class KnowledgeGraph:
                     tail_neg = tail
                     while True:
                         if corrupt_head_prob:
-                            head_neg = random.sample(list(self.entity_dict.values()), 1)[0]
+                            head_neg = random.choice(self.entities)
                         else:
-                            tail_neg = random.sample(list(self.entity_dict.values()), 1)[0]
+                            tail_neg = random.choice(self.entities)
                         if (head_neg, tail_neg, relation) not in self.training_triple_pool:
                             break
                     batch_neg.append((head_neg, tail_neg, relation))
